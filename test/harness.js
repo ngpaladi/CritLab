@@ -361,6 +361,21 @@ check('analysis completes in under 3 s', ms < 3000, ms + ' ms');
 // Laps.
 near('lap count recovered', A.summary.laps, truth.laps, 2, ' laps');
 check('laps came from GPS', A.summary.lapSource === 'gps', 'source: ' + A.summary.lapSource);
+
+// Lap 1 must start where the rider started, not at whichever straight the lap
+// detector found convenient. Anything else makes every lap straddle the line.
+{
+  let firstMoving = 0;
+  while (firstMoving < P.n && !P.moving[firstMoving]) firstMoving++;
+  const gap = A.lapBounds[0].i0 - firstMoving;
+  check('the lap splitter sits at the start line',
+    gap >= 0 && gap * P.dt <= 20,
+    'lap 1 begins ' + (gap * P.dt).toFixed(0) + ' s after the ride starts moving' +
+    ' (sample ' + A.lapBounds[0].i0 + ' vs ' + firstMoving + ')');
+  check('no riding is stranded before lap 1 beyond the roll-up',
+    A.lapBounds[0].i0 < P.n * 0.05,
+    'lap 1 starts ' + ((100 * A.lapBounds[0].i0) / P.n).toFixed(1) + '% into the ride');
+}
 if (A.laps.length) {
   const lens = A.laps.map(l => l.distance);
   near('lap length recovered', lens.reduce((a, b) => a + b, 0) / lens.length, truth.lapLength, 60, ' m');
@@ -540,6 +555,34 @@ check('finale summarised', isFinite(A.finale.exposed) && isFinite(A.finale.wbalA
   A.finale.basis + ': ' + A.finale.exposed.toFixed(0) + '% exposed, ' +
   A.finale.wbalAtStartPct.toFixed(0) + '% W′ left');
 
+// Elevation closure — the check that guards the gravity term the CdA fit
+// depends on. A circuit returns to the same height every lap; if the recorded
+// altitude does not, the gradient is partly barometric weather.
+{
+  const e = A.summary.elevation;
+  check('elevation closure computed', !!e && isFinite(e.meanAbsGrade),
+    'mean |gradient| ' + e.meanAbsGrade.toFixed(2) + '%, drift ' +
+    e.drift.toFixed(2) + ' m/lap, gain ' + e.gainPerLap.toFixed(1) + ' m/lap');
+  check('the simulated circuit closes on itself', Math.abs(e.drift) < 1.5,
+    e.drift.toFixed(2) + ' m per lap');
+  check('a closing circuit is reported as trustworthy', e.trustworthy === true);
+  check('a flat circuit is not flagged as hilly', e.hilly === false,
+    'mean |gradient| ' + e.meanAbsGrade.toFixed(2) + '%');
+
+  // Inject a drifting barometer and confirm it is caught.
+  const drifty = Demo.build();
+  drifty.alt = drifty.alt.map((a, i) => a + (i / drifty.alt.length) * 60);  // +60 m over the ride
+  const Pd = RideStore.prepare(drifty, { movingSpeed: 2.5 });
+  const cfgD = RideStore.configFor(Pd, {});
+  cfgD.rho = 1.2; cfgD.windSource = 'manual'; cfgD.windSpeed = 0;
+  const Ad = Analyzer.run(Pd, cfgD);
+  check('a drifting altimeter is detected', Ad.summary.elevation.trustworthy === false,
+    'drift ' + Ad.summary.elevation.drift.toFixed(2) + ' m/lap');
+  check('and explained in plain terms',
+    /barometric/.test(Ad.summary.elevation.note || ''),
+    (Ad.summary.elevation.note || '').slice(0, 60) + '…');
+}
+
 // Every series the charts read must be finite where it is used.
 {
   let bad = 0;
@@ -547,6 +590,47 @@ check('finale summarised', isFinite(A.finale.exposed) && isFinite(A.finale.wbalA
     if (!isFinite(A.solo[i]) || !isFinite(A.wattsS[i]) || !isFinite(A.soloS[i]) || !isFinite(A.wbal.bal[i])) bad++;
   }
   check('no NaNs in the plotted series', bad === 0, bad + ' bad samples');
+}
+
+// A recording that starts somewhere the rider never returns to — a car park, a
+// roll-out from race HQ — must fall through to the first point actually on the
+// circuit rather than giving up on laps altogether.
+{
+  const away = Demo.build();
+  const lead = 90;                                   // 90 s of approach riding
+  const dLat = 0.004;                                // ~450 m off the circuit
+  const t0 = away.t[0];
+  const pre = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+  for (let k = 0; k < lead; k++) {
+    pre.t.push(t0 - (lead - k));
+    pre.lat.push(away.lat[0] + dLat * (1 - k / lead));
+    pre.lon.push(away.lon[0]);
+    pre.alt.push(away.alt[0]);
+    pre.v.push(7);
+    pre.watts.push(120);
+    pre.dist.push(-(lead - k) * 7);
+  }
+  const shifted = {
+    ...away,
+    n: away.n + lead,
+    t: pre.t.concat(away.t),
+    lat: pre.lat.concat(away.lat),
+    lon: pre.lon.concat(away.lon),
+    alt: pre.alt.concat(away.alt),
+    v: pre.v.concat(away.v),
+    watts: pre.watts.concat(away.watts),
+    dist: pre.dist.concat(away.dist),
+  };
+  const Pa = RideStore.prepare(shifted, { movingSpeed: 2.5 });
+  const cfgA = RideStore.configFor(Pa, {});
+  cfgA.rho = 1.2; cfgA.windSource = 'manual'; cfgA.windSpeed = 0;
+  const Aa = Analyzer.run(Pa, cfgA);
+  check('a ride that starts off-circuit still finds its laps',
+    Aa.summary.laps >= truth.laps - 3,
+    Aa.summary.laps + ' laps found after a ' + lead + ' s approach');
+  check('and puts lap 1 on the circuit, not in the car park',
+    Aa.lapBounds[0].i0 >= lead - 10,
+    'lap 1 at sample ' + Aa.lapBounds[0].i0 + ', approach ended at ' + lead);
 }
 
 // ── 6. Weather-driven analysis path ─────────────────────────────────────────

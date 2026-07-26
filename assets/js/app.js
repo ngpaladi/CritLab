@@ -1099,6 +1099,9 @@
     let gaps = 0;
     for (let i = 0; i < entry.P.n; i++) if (entry.P.gap[i]) gaps++;
     if (gaps > entry.P.n * 0.02) caveats.push(Charts.fmtClock(gaps * entry.P.dt) + ' of recording gaps were excluded');
+    const elev = s.elevation;
+    if (elev && elev.note) caveats.push(elev.note);
+
     if (caveats.length) {
       out.push({ kind: 'info', title: 'Caveats for this file', body: caveats.join('; ') + '.' });
     }

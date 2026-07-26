@@ -167,9 +167,53 @@ const Analyzer = (() => {
     if (fromDevice) return fromDevice;
     if (!P.lat) return whole;
 
-    const anchorIdx = pickAnchor(P);
-    if (anchorIdx < 0) return whole;
+    // Try the start line first, then progressively later points on the track.
+    // The first candidate that yields a coherent set of laps wins, so lap 1
+    // begins where the rider began whenever that is a place they come back to.
+    for (const anchor of anchorCandidates(P)) {
+      const laps = lapsFromAnchor(P, anchor, cfg);
+      if (laps) return laps;
+    }
+    return whole;
+  }
 
+  /**
+   * Anchor candidates, earliest first.
+   *
+   * The old heuristic scored the whole first half of the ride for a fast,
+   * straight, unambiguous stretch and split laps there. That reliably found a
+   * place where lap detection *works*, and just as reliably put the lap
+   * boundary somewhere arbitrary — two minutes into the Sunshine Crit, so
+   * "lap 1" began partway round and every lap straddled the real start.
+   *
+   * What a rider means by lap 1 is the lap that starts at the line. So the
+   * candidates run in time order from the first moving GPS sample, and the
+   * earliest one that produces coherent laps is taken. Later candidates only
+   * come into play when the recording starts somewhere the rider never returns
+   * to — a car park, a neutral roll-out from the race HQ — in which case the
+   * first point actually on the circuit is the honest answer.
+   */
+  function anchorCandidates(P) {
+    const out = [];
+    let first = 0;
+    while (first < P.n && (!P.moving[first] || (!P.lat[first] && !P.lon[first]))) first++;
+    if (first >= P.n) return out;
+
+    const limit = Math.floor(P.n * 0.6);
+    const stride = Math.max(1, Math.round(3 / P.dt));
+    for (let i = first; i < limit; i += stride) {
+      if (!P.moving[i] || (!P.lat[i] && !P.lon[i])) continue;
+      out.push(i);
+    }
+    return out;
+  }
+
+  /**
+   * Laps as repeated passes of one anchor point, gated on heading so an
+   * out-and-back section cannot fire a false crossing.
+   * @returns {Array|null} the laps, or null if this anchor does not describe a circuit
+   */
+  function lapsFromAnchor(P, anchorIdx, cfg) {
     const la0 = P.lat[anchorIdx], lo0 = P.lon[anchorIdx], h0 = P.heading[anchorIdx];
     const mLat = 111320;
     const mLon = 111320 * Math.cos(la0 * Math.PI / 180);
@@ -202,27 +246,27 @@ const Analyzer = (() => {
     for (const k of crossings) {
       if (!kept.length || P.dist[k] - P.dist[kept[kept.length - 1]] > minLap) kept.push(k);
     }
-    if (kept.length < 3) return whole;
+    if (kept.length < 3) return null;
 
     const laps = [];
     for (let k = 0; k < kept.length - 1; k++) {
       laps.push({ i0: kept[k], i1: kept[k + 1], source: 'gps' });
     }
 
-    // A crit's laps are near-identical in length. If they are not, the anchor
+    // A crit's laps are near-identical in length. If they are not, this anchor
     // is firing on something that is not a start/finish line.
     const lens = laps.map(l => P.dist[l.i1] - P.dist[l.i0]);
     const med = median(lens);
-    if (!(med > 0)) return whole;
+    if (!(med > 0)) return null;
     const cv = Math.sqrt(Physics.mean(lens.map(x => (x - med) * (x - med)))) / med;
-    if (cv > 0.22) return whole;
+    if (cv > 0.22) return null;
 
-    // Trim laps that are wildly off the median (neutral roll-out, cool-down).
+    // Trim laps wildly off the median (neutral roll-out, cool-down).
     const good = laps.filter(l => {
       const d = P.dist[l.i1] - P.dist[l.i0];
       return d > 0.7 * med && d < 1.4 * med;
     });
-    return good.length >= 2 ? good : whole;
+    return good.length >= 2 ? good : null;
   }
 
   function lapsFromMarkers(P) {
@@ -242,20 +286,6 @@ const Analyzer = (() => {
       const d = P.dist[l.i1] - P.dist[l.i0];
       return d > 0.75 * med && d < 1.35 * med;
     });
-  }
-
-  /** A start anchor on a fast, straight, moving stretch early in the ride. */
-  function pickAnchor(P) {
-    const from = Math.floor(P.n * 0.08);
-    let best = -1, bestScore = -Infinity;
-    for (let i = from; i < Math.floor(P.n * 0.45); i++) {
-      if (!P.moving[i] || (P.gap && P.gap[i])) continue;
-      if (!P.lat[i] && !P.lon[i]) continue;
-      const straight = 1 - Math.min(1, Math.abs(P.curvature ? P.curvature[i] : 0) * 40);
-      const score = P.v[i] * straight;
-      if (score > bestScore) { bestScore = score; best = i; }
-    }
-    return best;
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────────
@@ -1004,6 +1034,14 @@ const Analyzer = (() => {
     let vMax = 0;
     for (let i = 0; i < P.n; i++) if (P.v[i] > vMax) vMax = P.v[i];
 
+    // Elevation closure: on a circuit every lap returns to where it began, so
+    // the net altitude change per lap should be ~0. It is a free check on the
+    // altimeter, and it matters more than it looks — gravity enters the
+    // solo-required power directly, and CdA is calibrated against a high
+    // percentile of the draft ratio, where a drifting altitude signal would
+    // quietly park a systematic error.
+    const elevation = elevationClosure(P, laps);
+
     const cornerKj = turns.reduce((s, t) => s + t.exitKjTotal, 0);
     // "Matches" excludes corner-exit accelerations — those are the price of the
     // circuit, not of a tactical decision, and they are priced on the Corners tab.
@@ -1040,6 +1078,66 @@ const Analyzer = (() => {
       wbalOverdraft: wbal.overdraft / 1000,
       wbalEmptySeconds: wbal.depletedSeconds,
       wbalTau: wbal.tau,
+      elevation,
+    };
+  }
+
+  /**
+   * How well the altitude trace closes over each lap, and how much of the
+   * modelled power the gradient is responsible for.
+   *
+   * @returns {{netPerLap, drift, gainPerLap, gradeShare, trustworthy, note}}
+   */
+  function elevationClosure(P, laps) {
+    const real = laps.length && laps[0].source !== 'none';
+
+    // What fraction of the modelled resistive power comes from gravity? On a
+    // flat crit this is a rounding error; on a rolling circuit it is not, and
+    // the altimeter's accuracy starts to matter to the CdA fit.
+    let grav = 0, total = 0;
+    for (let i = 0; i < P.n; i++) {
+      if (!P.moving[i]) continue;
+      grav += Math.abs(Math.sin(P.theta[i])) * P.v[i];
+      total += P.v[i];
+    }
+    const meanAbsGrade = total > 0 ? (grav / total) * 100 : 0;
+
+    let gainPerLap = NaN, netPerLap = NaN, drift = NaN;
+    if (real) {
+      const nets = laps.map(l => P.alt[l.i1] - P.alt[l.i0]);
+      netPerLap = median(nets);
+      drift = (P.alt[laps[laps.length - 1].i1] - P.alt[laps[0].i0]) / laps.length;
+      let gain = 0;
+      for (let i = laps[0].i0 + 1; i <= laps[laps.length - 1].i1; i++) {
+        const d = P.alt[i] - P.alt[i - 1];
+        if (d > 0) gain += d;
+      }
+      gainPerLap = gain / laps.length;
+    }
+
+    // A lap that does not return to its own start height means the barometer
+    // moved, not the road.
+    const drifting = isFinite(drift) && Math.abs(drift) > 1.5;
+    const hilly = meanAbsGrade > 1.5;
+
+    let note = null;
+    if (drifting) {
+      note = 'the altitude trace drifts about ' + drift.toFixed(1) +
+        ' m per lap on a circuit that returns to the same place each time, so ' +
+        'the gradient — and the gravity term in every power estimate — is ' +
+        'partly barometric weather rather than road';
+    } else if (hilly) {
+      note = 'this circuit is genuinely hilly (mean |gradient| ' +
+        meanAbsGrade.toFixed(1) + '%), so the CdA calibration leans on the ' +
+        'altitude data more than it would on a flat course';
+    }
+
+    return {
+      netPerLap, drift, gainPerLap,
+      meanAbsGrade,
+      trustworthy: !drifting,
+      hilly,
+      note,
     };
   }
 
@@ -1158,8 +1256,8 @@ const Analyzer = (() => {
   function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 
   return {
-    run, resolveWind, detectLaps, detectTurns, buildSectors, detectSurges,
-    exposureByHeading, compareRow, angleDelta, R_EARTH,
+    run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, detectTurns, buildSectors, detectSurges,
+    exposureByHeading, elevationClosure, compareRow, angleDelta, R_EARTH,
     buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };
 })();
