@@ -546,11 +546,18 @@
       const warn = document.createElement('div');
       warn.className = 'status status-warn';
       warn.style.marginBottom = '6px';
-      warn.innerHTML = skipped.length + ' entr' + (skipped.length === 1 ? 'y' : 'ies') +
-        ' on intervals.icu ' + (skipped.length === 1 ? 'has' : 'have') +
-        ' no activity type or metrics — usually an incomplete sync from another ' +
-        'service. ' + skipped.map(a => (a.start || '').slice(0, 10)).join(', ') +
-        '. If a race is missing, that is probably it.';
+      const strava = skipped.filter(a => a.apiBlocked);
+      const dates = skipped.map(a => (a.start || '').slice(0, 10)).join(', ');
+      warn.innerHTML = strava.length
+        ? '<b>' + strava.length + ' activit' + (strava.length === 1 ? 'y' : 'ies') +
+          ' came from Strava</b> (' + dates + ') and cannot be read through the ' +
+          'intervals.icu API — Strava does not allow it. If your race is missing, ' +
+          'this is why. Upload the .fit to intervals.icu directly, or just drag it ' +
+          'into CritLab.'
+        : skipped.length + ' entr' + (skipped.length === 1 ? 'y' : 'ies') +
+          ' on intervals.icu ' + (skipped.length === 1 ? 'has' : 'have') +
+          ' no activity type or metrics — usually an incomplete sync. ' + dates +
+          '. If a race is missing, that is probably it.';
       out.appendChild(warn);
     }
 

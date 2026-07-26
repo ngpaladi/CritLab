@@ -14,6 +14,24 @@ const Intervals = (() => {
 
   const BASE = 'https://intervals.icu/api/v1';
 
+  /**
+   * Strava's API terms do not let intervals.icu pass Strava-sourced activity
+   * data on through its own API, so those activities are readable in the
+   * intervals.icu web UI but not by any API client — this one included.
+   *
+   * The trap is that an activity uploaded from a head unit can *become*
+   * Strava-sourced later: if a Strava copy of the same ride arrives, the two
+   * are de-duplicated and the Strava record can end up the canonical one. The
+   * original then vanishes from the activity list and its streams come back
+   * empty, with nothing anywhere saying why.
+   */
+  const STRAVA_BLOCKED =
+    'This activity reached intervals.icu from Strava, and Strava does not permit ' +
+    'intervals.icu to serve its data through the API — so no API client can read ' +
+    'it, including this one. Resyncing from Strava will not help. Either upload ' +
+    'the original .fit to intervals.icu directly (so the copy there is not ' +
+    'Strava-sourced), or simply drag the .fit file into CritLab.';
+
   const STREAM_TYPES = [
     'time', 'watts', 'fixed_watts', 'heartrate', 'cadence',
     'distance', 'altitude', 'latlng', 'velocity_smooth', 'temp',
@@ -48,6 +66,17 @@ const Intervals = (() => {
     }
     if (res.status === 429) {
       throw new Error('intervals.icu rate limit hit. Wait a few minutes and try again.');
+    }
+    if (res.status === 422) {
+      // intervals.icu refuses to re-serve Strava-sourced activities through its
+      // own API — Strava's terms forbid it. Nothing about the key or the
+      // request is wrong, and no amount of retrying or resyncing from Strava
+      // will help; the data has to reach intervals.icu by another route.
+      let body = '';
+      try { body = await res.text(); } catch (_) {}
+      if (/strava/i.test(body)) throw new Error(STRAVA_BLOCKED);
+      throw new Error('intervals.icu rejected the request (HTTP 422)' +
+        (body ? ': ' + body.slice(0, 160) : '.'));
     }
     if (!res.ok) {
       let detail = '';
@@ -116,6 +145,9 @@ const Intervals = (() => {
       hasGpsStream: streams.includes('latlng'),
       hasPowerStream: streams.includes('watts') || streams.includes('fixed_watts'),
       device: a.device_name || null,
+      source: a.source || null,
+      // A Strava-sourced record is a dead end for the API, whatever else it says.
+      apiBlocked: String(a.source || '').toUpperCase() === 'STRAVA',
       start: a.start_date_local || a.start_date || null,
       startUtc: a.start_date || null,
       movingTime: numOrNull(a.moving_time),
@@ -204,10 +236,11 @@ const Intervals = (() => {
       // the streams were dropped during de-duplication. The summary still
       // reports `stream_types`, so this is not detectable before asking.
       throw new Error(
-        'intervals.icu has no sample data for this activity — the summary is ' +
-        'there but the streams come back empty. This usually means it was ' +
-        'de-duplicated against another copy (often a Strava sync). Fix it on ' +
-        'intervals.icu, or drag the .fit file in here instead.'
+        'intervals.icu has the summary for this activity but no sample data — ' +
+        'the streams come back empty. This usually means it was de-duplicated ' +
+        'against a Strava copy of the same ride, which the API is not allowed ' +
+        'to serve. Upload the original .fit to intervals.icu, or drag it into ' +
+        'CritLab directly.'
       );
     }
     const n = time.length;
@@ -258,6 +291,7 @@ const Intervals = (() => {
   /** Fetch + normalise in one call. */
   async function loadRide(activityId, key) {
     const activity = await getActivity(activityId, key);
+    if (activity.apiBlocked) throw new Error(STRAVA_BLOCKED);
     const streams = await getStreams(activityId, key);
     return toRide(activity, streams);
   }
@@ -346,7 +380,7 @@ const Intervals = (() => {
 
   return {
     BASE, STREAM_TYPES,
-    testKey, listActivities, getActivity, getStreams, toRide, loadRide, isRide, coordinates, tagsIn,
+    testKey, listActivities, getActivity, getStreams, toRide, loadRide, isRide, coordinates, tagsIn, STRAVA_BLOCKED,
   };
 })();
 

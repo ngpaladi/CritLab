@@ -729,6 +729,46 @@ section('intervals.icu activity filters');
     Intervals.tagsIn(acts.filter(a => !/Worlds/.test(a.name))).length === 0);
 }
 
+// ── 8c. Strava-sourced activities ───────────────────────────────────────────
+
+section('Strava-sourced activities');
+
+{
+  // intervals.icu will not serve Strava-sourced data through its API (Strava's
+  // terms forbid it). The failure is silent from the outside — the activity
+  // simply stops appearing — so the client has to recognise and explain it.
+  const stravaActivity = {
+    id: '19460641208', source: 'STRAVA', start_date_local: '2026-07-25T09:54:58',
+    name: null, type: null, stream_types: null,
+  };
+  const summarised = [stravaActivity].map(a => ({
+    source: a.source || null,
+    apiBlocked: String(a.source || '').toUpperCase() === 'STRAVA',
+  }))[0];
+  check('a Strava-sourced activity is flagged as unreadable',
+    summarised.apiBlocked === true);
+
+  const wahoo = { source: 'WAHOO' };
+  check('a head-unit activity is not flagged',
+    String(wahoo.source).toUpperCase() !== 'STRAVA');
+
+  check('the explanation names the cause and the way out',
+    /Strava/.test(Intervals.STRAVA_BLOCKED) &&
+    /\.fit/.test(Intervals.STRAVA_BLOCKED) &&
+    /will not help/.test(Intervals.STRAVA_BLOCKED),
+    Intervals.STRAVA_BLOCKED.slice(0, 70) + '…');
+
+  // An activity whose summary exists but whose streams are empty must fail with
+  // a message that points somewhere useful, not "no time stream".
+  let msg = '';
+  try {
+    Intervals.toRide({ id: 'x', name: 'Ghost race', type: 'Ride' }, { time: [] });
+  } catch (err) { msg = err.message; }
+  check('empty streams produce a diagnosis, not a shrug',
+    /no sample data/.test(msg) && /de-duplicated/.test(msg) && /\.fit/.test(msg),
+    msg.slice(0, 80) + '…');
+}
+
 // ── 9. OpenStreetMap basemap ────────────────────────────────────────────────
 
 section('OSM basemap');

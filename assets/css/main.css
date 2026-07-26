@@ -692,9 +692,11 @@ table.data td.dim { color: var(--text-muted); }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(13, 17, 23, .62);
-  backdrop-filter: blur(2px);
-  animation: cl-fade .16s ease-out;
+  /* Heavy enough that the app underneath is plainly out of action. A timid
+     scrim reads as a rendering artefact; this reads as "wait". */
+  background: rgba(6, 9, 13, .86);
+  backdrop-filter: blur(3px) saturate(.55);
+  animation: cl-fade .14s ease-out;
 }
 .busy-overlay[hidden] { display: none; }
 
@@ -703,13 +705,19 @@ table.data td.dim { color: var(--text-muted); }
 .busy-card {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 15px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   border-radius: 10px;
-  padding: 18px 22px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
-  min-width: 240px;
+  padding: 20px 26px;
+  box-shadow: 0 16px 52px rgba(0, 0, 0, .7), 0 0 0 1px rgba(88, 166, 255, .18);
+  min-width: 260px;
+  animation: cl-rise .16s ease-out;
+}
+
+@keyframes cl-rise {
+  from { transform: translateY(5px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 
 .busy-spinner {
@@ -728,6 +736,6 @@ table.data td.dim { color: var(--text-muted); }
 /* Respect a reduced-motion preference: keep the feedback, drop the spin. */
 @media (prefers-reduced-motion: reduce) {
   .busy-spinner { animation: none; border-top-color: var(--accent); opacity: .8; }
-  .busy-overlay { animation: none; }
+  .busy-overlay, .busy-card { animation: none; }
   .ride-refresh.spinning { animation: none; }
 }
