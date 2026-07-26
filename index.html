@@ -1,0 +1,403 @@
+---
+layout: default
+title: Analyze
+app: true
+---
+
+<div class="app-wrap" id="app-wrap" data-panel="analysis">
+
+  <!-- ── Races ─────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Load a race</div>
+      <div class="dropzone" id="dropzone">
+        Drop a <b>.fit</b> or <b>.json</b> file<br>or click to choose
+      </div>
+      <input type="file" id="file-input" accept=".fit,.FIT,.json" multiple hidden>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-sm" id="demo-btn">Load sample race</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">
+        <span>intervals.icu</span>
+        <button class="btn btn-sm" id="icu-open-settings">Key</button>
+      </div>
+      <div id="icu-panel">
+        <p class="hint" style="margin-bottom:8px">
+          Your key goes only to intervals.icu &mdash; CritLab has no server to send it to.
+        </p>
+        <div class="field">
+          <label for="icu-from">From</label>
+          <label for="icu-to" style="text-align:right">To</label>
+          <div class="field-input" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <input type="date" id="icu-from">
+            <input type="date" id="icu-to">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn btn-sm btn-primary" id="icu-fetch">Find rides</button>
+          <button class="btn btn-sm" id="icu-range-90" title="Widen to the last 90 days">90d</button>
+        </div>
+
+        <div id="icu-filters" style="display:none;margin-top:10px">
+          <input type="text" id="icu-search" placeholder="Filter by name…" autocomplete="off">
+          <div class="chips" id="icu-chips"></div>
+        </div>
+
+        <div id="icu-results" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section-title" style="padding:10px 12px 0">
+      <span>Loaded races</span>
+      <span class="hint" id="race-count"></span>
+    </div>
+    <div class="scroll-y">
+      <div class="ride-list" id="race-list">
+        <div class="list-empty">No races yet</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Analysis ──────────────────────────────────────────────────────── -->
+  <div class="center-area">
+    <div class="tabbar" id="tabbar">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="timeline">Timeline</button>
+      <button class="tab" data-tab="circuit">Circuit</button>
+      <button class="tab" data-tab="laps">Laps</button>
+      <button class="tab" data-tab="corners">Corners</button>
+      <button class="tab" data-tab="surges">Surges &amp; W′</button>
+      <button class="tab" data-tab="replay">Replay</button>
+      <button class="tab" data-tab="compare">Compare</button>
+    </div>
+
+    <div class="panels" id="panels">
+
+      <!-- Overview -->
+      <section class="panel active" data-panel-id="overview">
+        <div class="stat-row" id="stat-row"></div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">What the race cost you</span>
+            <span class="card-sub" id="findings-sub"></span>
+          </div>
+          <div id="findings"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Power against solo-required</span>
+            <span class="card-sub" id="overview-name"></span>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="ov-timeline"></canvas></div>
+          <div class="chart-wrap"><canvas class="chart" id="ov-strip"></canvas></div>
+          <div class="legend" id="ov-legend"></div>
+        </div>
+      </section>
+
+      <!-- Timeline -->
+      <section class="panel" data-panel-id="timeline">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Power against solo-required</span>
+            <div class="seg" style="width:170px">
+              <button data-x="dist" class="active">Distance</button>
+              <button data-x="time">Time</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="tl-main"></canvas></div>
+          <div class="chart-wrap"><canvas class="chart" id="tl-strip"></canvas></div>
+          <div class="legend" id="tl-legend"></div>
+          <p class="card-note">
+            Shaded stretches are where your draft ratio sat at or above the
+            <em>clean air</em> threshold. The lower band is the ratio itself, blue below
+            1.0 (someone else doing the work) and red above (you doing more than a
+            solo rider would need).
+          </p>
+        </div>
+      </section>
+
+      <!-- Circuit -->
+      <section class="panel" data-panel-id="circuit">
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title">Circuit, coloured by exposure</span>
+              <span class="card-sub" id="map-sub"></span>
+            </div>
+            <div class="chart-wrap"><canvas class="chart" id="map-main"></canvas></div>
+            <div class="legend" id="map-legend"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">Exposure by direction of travel</span></div>
+            <div class="chart-wrap"><canvas class="chart" id="rose"></canvas></div>
+            <p class="card-note">
+              Wedge length is time spent pointing that way; colour is the median draft
+              ratio there. With a real crosswind one bearing should stand out.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Every lap, every sector</span>
+            <span class="card-sub">the repeated-leak view</span>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="heatmap"></canvas></div>
+          <div class="legend" id="heat-legend"></div>
+          <p class="card-note">
+            One row per lap, one column per stretch of circuit. A column that stays red
+            top to bottom is a place you were working harder than usual <em>every single
+            lap</em> — that is a positioning habit, not bad luck.
+          </p>
+          <p class="card-note">
+            Unlike the map, this grid is scaled to <em>your own median for this race</em>
+            rather than to an absolute 1.0, because its job is comparing stretches to each
+            other. If you sat in the bunch all evening, every sector is sheltered in
+            absolute terms and only the relative differences carry information.
+          </p>
+        </div>
+      </section>
+
+      <!-- Laps -->
+      <section class="panel" data-panel-id="laps">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Time in clean air, per lap</span>
+            <span class="card-sub" id="lap-source"></span>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="lap-bars"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Lap detail</span></div>
+          <div class="table-scroll" id="lap-table"></div>
+        </div>
+      </section>
+
+      <!-- Corners -->
+      <section class="panel" data-panel-id="corners">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">What each corner costs</span>
+            <div class="seg" style="width:300px">
+              <button data-turn="exit" class="active">Exit cost</button>
+              <button data-turn="loss">Speed scrubbed</button>
+              <button data-turn="apex">Apex speed</button>
+              <button data-turn="recover">Recovery</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="turn-bars"></canvas></div>
+          <p class="card-note">
+            Exit cost is the work above CP spent getting back to entry speed after the
+            apex. Bars are coloured by the draft ratio on the exit: a red bar means you
+            were paying for that acceleration in clean air, with nobody to follow.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Corner detail</span></div>
+          <div class="table-scroll" id="turn-table"></div>
+        </div>
+      </section>
+
+      <!-- Surges & W' -->
+      <section class="panel" data-panel-id="surges">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">W′ balance</span>
+            <span class="card-sub" id="wbal-sub"></span>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="wbal"></canvas></div>
+          <div class="legend" id="wbal-legend"></div>
+          <p class="card-note">
+            Skiba's differential model: the tank drains above CP and refills below it.
+            Shaded bands are detected surges. Where the trace flattens near the floor is
+            where you stopped having a sprint.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Match ledger</span>
+            <span class="card-sub" id="surge-sub"></span>
+          </div>
+          <div class="table-scroll" id="surge-table"></div>
+        </div>
+      </section>
+
+      <!-- Replay -->
+      <section class="panel" data-panel-id="replay">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Replay</span>
+            <span class="card-sub" id="rp-sub"></span>
+          </div>
+          <div class="card-grid">
+            <div class="chart-wrap"><canvas class="chart" id="rp-map"></canvas></div>
+            <div>
+              <div class="chart-wrap"><canvas class="chart" id="rp-strip"></canvas></div>
+              <div class="chart-wrap" style="margin-top:6px"><canvas class="chart" id="rp-battery"></canvas></div>
+            </div>
+          </div>
+          <div class="replay-bar">
+            <button class="btn btn-primary" id="rp-play">▶ Play</button>
+            <input type="range" id="rp-scrub" min="0" max="1000" value="0">
+            <select id="rp-speed" style="width:72px">
+              <option value="5">5×</option>
+              <option value="15" selected>15×</option>
+              <option value="30">30×</option>
+              <option value="60">60×</option>
+            </select>
+            <span class="replay-clock" id="rp-clock">0:00</span>
+          </div>
+          <p class="card-note">
+            The battery is your W′ balance at this instant — the anaerobic reserve above
+            critical power. Ten cells rather than a smooth bar, because the underlying W′
+            is an estimate and reading it to the nearest 100 J would be false precision.
+            The dashed notch marks the lowest point of the whole race.
+          </p>
+        </div>
+      </section>
+
+      <!-- Compare -->
+      <section class="panel" data-panel-id="compare">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Compare races</span>
+            <div class="seg" style="width:340px">
+              <button data-cmp="exposed" class="active">Clean air</button>
+              <button data-cmp="finale">Finale</button>
+              <button data-cmp="matchKj">Matches</button>
+              <button data-cmp="cornerKj">Corners</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="cmp-bars"></canvas></div>
+          <p class="card-note">
+            Tick races in the sidebar to include them. Every race is re-analysed with the
+            settings on the right, so the comparison is like for like.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Side by side</span></div>
+          <div class="table-scroll" id="cmp-table"></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ── Rider & conditions ────────────────────────────────────────────── -->
+  <aside class="rail">
+    <div class="scroll-y">
+
+      <div class="rail-section">
+        <div class="sidebar-section-title">
+          <span>Conditions</span>
+          <button class="btn btn-sm" id="wx-refresh" title="Re-fetch weather">↻</button>
+        </div>
+        <div id="wx-readout" class="status status-info">No race loaded.</div>
+        <div class="field" style="margin-top:10px">
+          <label>Wind source</label>
+        </div>
+        <div class="seg">
+          <button data-wind="weather" id="wind-weather">Weather</button>
+          <button data-wind="manual" id="wind-manual">Manual</button>
+          <button data-wind="fit" id="wind-fit">Infer</button>
+        </div>
+        <div id="wind-manual-fields" style="display:none">
+          <div class="field">
+            <label for="in-windSpeed">Wind speed at 10 m</label>
+            <span class="field-val" id="v-windSpeed">0.0 m/s</span>
+            <input class="field-input" type="range" id="in-windSpeed" min="0" max="18" step="0.1" value="0">
+          </div>
+          <div class="field">
+            <label for="in-windDir">Blowing from</label>
+            <span class="field-val" id="v-windDir">N 0°</span>
+            <input class="field-input" type="range" id="in-windDir" min="0" max="359" step="5" value="0">
+          </div>
+        </div>
+        <div id="wind-note" class="hint" style="margin-top:8px"></div>
+      </div>
+
+      <div class="rail-section">
+        <div class="sidebar-section-title">Rider &amp; machine</div>
+        <div class="field">
+          <label for="in-mass">Total mass (rider + bike)</label>
+          <span class="field-val" id="v-mass">78 kg</span>
+          <input class="field-input" type="range" id="in-mass" min="50" max="130" step="0.5" value="78">
+        </div>
+        <div class="field">
+          <label for="in-cda">CdA</label>
+          <span class="field-val" id="v-cda">0.320 m²</span>
+          <input class="field-input" type="range" id="in-cda" min="0.180" max="0.500" step="0.002" value="0.320">
+        </div>
+        <label class="check"><input type="checkbox" id="in-lockCda"><span>Lock CdA (don't calibrate it)</span></label>
+        <div class="field">
+          <label for="in-crr">Crr</label>
+          <span class="field-val" id="v-crr">0.0040</span>
+          <input class="field-input" type="range" id="in-crr" min="0.0020" max="0.0090" step="0.0001" value="0.0040">
+        </div>
+        <div class="field">
+          <label for="in-yawK">Yaw sensitivity</label>
+          <span class="field-val" id="v-yawK">0.15</span>
+          <input class="field-input" type="range" id="in-yawK" min="0" max="0.6" step="0.01" value="0.15">
+        </div>
+      </div>
+
+      <div class="rail-section">
+        <div class="sidebar-section-title">Fitness</div>
+        <div class="field">
+          <label for="in-ftp">FTP</label>
+          <span class="field-val" id="v-ftp">250 W</span>
+          <input class="field-input" type="range" id="in-ftp" min="120" max="500" step="1" value="250">
+        </div>
+        <div class="field">
+          <label for="in-cp">Critical power</label>
+          <span class="field-val" id="v-cp">250 W</span>
+          <input class="field-input" type="range" id="in-cp" min="120" max="500" step="1" value="250">
+        </div>
+        <div class="field">
+          <label for="in-wPrime">W′ (anaerobic capacity)</label>
+          <span class="field-val" id="v-wPrime">20.0 kJ</span>
+          <input class="field-input" type="range" id="in-wPrime" min="5000" max="45000" step="250" value="20000">
+        </div>
+      </div>
+
+      <div class="rail-section">
+        <div class="sidebar-section-title">Thresholds</div>
+        <div class="field">
+          <label for="in-cleanAirPct">Clean-air calibration percentile</label>
+          <span class="field-val" id="v-cleanAirPct">85%</span>
+          <input class="field-input" type="range" id="in-cleanAirPct" min="0.60" max="0.98" step="0.01" value="0.85">
+        </div>
+        <div class="field">
+          <label for="in-exposedAt">Clean air at ratio ≥</label>
+          <span class="field-val" id="v-exposedAt">0.95</span>
+          <input class="field-input" type="range" id="in-exposedAt" min="0.80" max="1.15" step="0.01" value="0.95">
+        </div>
+        <div class="field">
+          <label for="in-shelteredAt">Sheltered at ratio ≤</label>
+          <span class="field-val" id="v-shelteredAt">0.75</span>
+          <input class="field-input" type="range" id="in-shelteredAt" min="0.50" max="0.95" step="0.01" value="0.75">
+        </div>
+        <div class="field">
+          <label for="in-surgeFactor">Surge threshold (× CP)</label>
+          <span class="field-val" id="v-surgeFactor">1.40</span>
+          <input class="field-input" type="range" id="in-surgeFactor" min="1.00" max="2.20" step="0.05" value="1.40">
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-sm" id="reset-settings">Reset to defaults</button>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+</div>
+
+<nav class="mobile-nav">
+  <button class="mobile-tab" data-mpanel="rides">Races</button>
+  <button class="mobile-tab active" data-mpanel="analysis">Analysis</button>
+  <button class="mobile-tab" data-mpanel="setup">Setup</button>
+</nav>

@@ -1,0 +1,10 @@
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata
+vendor/
+Gemfile.lock
+node_modules/
+
+# Rendered chart output — regenerable via `node test/render.js`
+reference/render/

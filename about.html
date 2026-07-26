@@ -1,0 +1,291 @@
+---
+layout: default
+title: About
+---
+
+<div class="prose">
+
+<h1>About CritLab</h1>
+
+<p class="lead">
+  CritLab estimates, second by second, how much of a criterium you spent doing
+  your own work and how much you spent on somebody else's wheel — then tells you
+  where on the circuit you kept getting it wrong.
+</p>
+
+<p>
+  It runs entirely in your browser. There is no CritLab server, no account, and
+  no upload. Races you load are stored in this browser's IndexedDB and go
+  nowhere else.
+</p>
+
+<h2>What it actually computes</h2>
+
+<p>
+  For every second of the race it works out the <b>solo-required power</b>: the
+  watts it would have taken to hold your measured speed, on your measured
+  gradient, in the wind that was actually blowing, with nobody in front of you.
+  Divide your real power by that and you get the <b>draft ratio</b>.
+</p>
+
+<ul>
+  <li><b>Around 1.0</b> — you were paying full price. Clean air.</li>
+  <li><b>0.55–0.75</b> — a wheel. Somebody else is punching the hole.</li>
+  <li><b>Above 1.0</b> — more than a solo rider would need, so you were accelerating: closing a gap, sprinting out of a corner, or attacking.</li>
+</ul>
+
+<p>The model behind the solo-required figure is the standard one:</p>
+
+<p><code>P = (m·g·sin θ + m·g·Crr·cos θ + ½·ρ·CdA(β)·v<sub>app</sub>·v<sub>head</sub> + (m + m<sub>rot</sub>)·a) · v / η</code></p>
+
+<p>with a few refinements that matter at crit speeds:</p>
+
+<ul>
+  <li><b>Humid air density.</b> Water vapour is lighter than dry air; a muggy July evening is measurably faster than the dry-air formula suggests.</li>
+  <li><b>Apparent wind, not ground wind.</b> The aero term uses the wind you actually feel, resolved into head and cross components from your bearing, with a yaw term that widens effective CdA as the wind comes further off the nose.</li>
+  <li><b>Wind at rider height, not 10 m.</b> Weather stations report wind at 10 metres. A rider sits at about 1.3. The logarithmic wind profile scales between them, and the surface-roughness setting is the single biggest lever: an airport-flat course sees roughly six times the wind of a downtown circuit boxed in by buildings.</li>
+  <li><b>Gradient by regression, not differencing.</b> Barometric altimeters are noisy at one-second resolution, and naively differentiating them invents gradients that the power model dutifully converts into phantom watts. CritLab fits altitude against distance over a rolling window instead, widening it when you are moving fast enough that a fixed window holds too few samples.</li>
+  <li><b>Recording gaps are excluded, not interpolated.</b> If your head unit auto-paused at a stoplight, those seconds are flagged and left out rather than filled with invented power.</li>
+</ul>
+
+<h2>Where the wind comes from</h2>
+
+<p>Three sources, in decreasing order of how much you should trust them:</p>
+
+<table class="data">
+  <thead><tr><th>Source</th><th>Unknowns to solve</th><th>Needs</th></tr></thead>
+  <tbody>
+    <tr><td><b>Weather</b></td><td>CdA only</td><td>GPS and a start timestamp</td></tr>
+    <tr><td><b>Manual</b></td><td>CdA only</td><td>You to know what it was doing</td></tr>
+    <tr><td><b>Infer</b></td><td>CdA and a wind vector</td><td>A course with several bearings</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Weather comes from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>,
+  which is keyless and needs no account. CritLab sends it your race's coordinates
+  and date and gets back an hourly series — temperature, humidity, pressure, wind
+  speed, direction and gusts — which it interpolates per sample, because a
+  60-minute crit can straddle a wind shift.
+</p>
+
+<p>
+  <b>Inference</b> is the fallback when there is no weather. It exploits the fact
+  that with the wrong wind assumed, apparent exposure becomes a function of which
+  way you are pointing — the north-bound straight looks systematically harder
+  than the south-bound one. The wind that flattens that difference is the wind
+  that was blowing. This needs you to have ridden in several directions: a
+  four-corner rectangle gives four bearings against three unknowns, which is
+  solvable but loose, and CritLab will tell you when it is only guessing.
+</p>
+
+<h2>The CdA assumption, stated plainly</h2>
+
+<p>
+  CritLab does not know your CdA, so it calibrates one: it assumes that in your
+  <em>least sheltered</em> moments — by default the 85th percentile of steady,
+  fast, pedalling seconds — you were riding in clean air, and picks the CdA that
+  makes that moment come out at a ratio of exactly 1.0.
+</p>
+
+<p>
+  This is an assumption, not a measurement, and it is the single knob that moves
+  the absolute numbers. If you spent the whole race buried in the bunch and never
+  once hit the front, the assumption is wrong and the reported exposure will be
+  too high. Drag the <b>clean-air calibration percentile</b> slider and watch the
+  headline percentages move.
+</p>
+
+<p>
+  What barely moves is the <em>pattern</em>: which stretch of the circuit was
+  worst, which corner cost the most, whether your matches were lit from a wheel
+  or from the wind. That is why the sector view is ranked by how often a stretch
+  came out worst on its own lap, rather than by an absolute threshold — a
+  finding built that way survives being wrong about CdA.
+</p>
+
+<h2>Laps, corners and sectors</h2>
+
+<p>
+  Laps come from your head unit's lap markers when they look like a circuit,
+  and otherwise from repeated passes of a start anchor, gated on heading so an
+  out-and-back section cannot fire a false lap. If the detected laps are not
+  near-identical in length, CritLab decides it is not looking at a circuit and
+  says so rather than inventing structure.
+</p>
+
+<p>
+  <b>Corners</b> are not found by thresholding the curvature of your raw track,
+  which sounds like the obvious approach and fights physics it cannot win: at
+  43&nbsp;km/h a 1&nbsp;Hz recorder puts a sample every 12 metres, so a
+  16&nbsp;metre corner is two or three points and the GPS noise between them is
+  comparable to the turn itself.
+</p>
+
+<p>
+  But a crit is the same corner twenty times. CritLab stacks every lap onto a
+  shared lap-distance grid and takes the <em>median</em> line — robust to the
+  one lap you went wide to come past somebody, and positional noise falls by
+  roughly the square root of the lap count. Corners are then measured on a clean
+  2&nbsp;metre grid instead of a ragged 12&nbsp;metre one, with the radius from a
+  least-squares circle fit, and every lap contributes one pass by construction
+  rather than by hoping a threshold fires again. On a simulated circuit built
+  from known 16&nbsp;metre arcs, this recovers 16.8–17.5&nbsp;m; the naive
+  method reported 31&nbsp;m.
+</p>
+
+<p>
+  For each pass it measures entry speed, apex speed, how long you took to get
+  back to entry speed, and the work above CP that took — the <b>exit cost</b>.
+  Consistency matters as much as the mean: a corner you take differently every
+  lap is one you are arriving at in a different position every lap.
+</p>
+
+<p>
+  <b>Sectors</b> are the stretches between corners. The lap × sector grid is the
+  view worth the whole tool: a column that stays red top to bottom is a place you
+  were in the wind <em>every single lap</em>, and that is a habit, not luck.
+</p>
+
+<h2>Matches and W′</h2>
+
+<p>
+  W′ balance uses Skiba's differential model with Clarke's recovery expression:
+  the anaerobic tank drains at (P − CP) above critical power and refills below it
+  with a time constant set by how far below you are recovering. The reported
+  balance is clamped at empty — "how much is left" cannot be negative — but
+  demand beyond empty is not thrown away; it accumulates as an overdraft, which
+  is the honest signal that your configured W′ is too small.
+</p>
+
+<p>
+  A crit sits above any fixed watts threshold almost constantly, so CritLab does
+  not call every kick a match. An effort counts only if it took a real bite out
+  of W′, and efforts that are simply corner-exit accelerations are classified
+  separately — they cost W′, but they are the price of the circuit rather than a
+  tactical decision, and they are already priced on the Corners tab.
+</p>
+
+<h2>The map</h2>
+
+<p>
+  The circuit map draws roads, buildings and water from
+  <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+  underneath your track, as vectors rather than raster tiles — so it can be
+  styled to sit quietly beneath the exposure colours instead of competing with
+  them, and so it takes one cached request per circuit rather than a screenful
+  of tiles. Buildings are not decoration: on a town-centre circuit they are the
+  reason one straight is sheltered and the opposite one is not.
+</p>
+
+<p>
+  Map data comes from the volunteer-run Overpass API, which is free and
+  sometimes busy. If it is rate-limiting or down, the map simply draws without a
+  backdrop.
+</p>
+
+<h2>What it needs from a file</h2>
+
+<ul>
+  <li><b>Power is required.</b> Everything here is built on comparing your watts to a modelled requirement.</li>
+  <li><b>GPS is strongly recommended.</b> Without it there are no laps, no corners, no sectors, no map, and no gradient — you get the timeline, the load metrics and W′.</li>
+  <li><b>A start timestamp</b> is what lets CritLab date the weather.</li>
+</ul>
+
+<p>
+  Accepted formats: <code>.fit</code> from any head unit, activities pulled
+  directly from intervals.icu, and JSON — either CritLab's own shape or an
+  intervals.icu stream dump.
+</p>
+
+<h2>Privacy, and your API key</h2>
+
+<p class="lead">
+  CritLab has no server. It is a static page &mdash; HTML, CSS and JavaScript
+  served from a file host. There is no backend, no database, no account, and no
+  analytics.
+</p>
+
+<p>
+  That single fact is what makes the rest of this section true rather than a
+  promise. <b>Your intervals.icu API key is never sent to CritLab, because there
+  is nothing to send it to.</b> It goes to one place and one place only: the
+  <code>Authorization</code> header of the requests your own browser makes
+  directly to <code>intervals.icu</code> &mdash; which is where the key came
+  from, and the only service where it means anything.
+</p>
+
+<p>
+  To be precise, because a vague security claim is worse than none: the key
+  <em>does</em> travel over the network, to intervals.icu, over HTTPS. That is
+  how the API authenticates you and there is no way around it. What it never
+  does is reach us, or a third party, or any intermediary &mdash; there is no
+  proxy in the path, and nowhere else in this application touches it.
+</p>
+
+<h3>Where it is kept</h3>
+
+<p>
+  So you don't have to paste it on every visit, the key is held in your
+  browser's storage under its own entry, separate from every other setting.
+  Under <b>Settings &rarr; intervals.icu</b> you choose:
+</p>
+
+<ul>
+  <li><b>In this browser, until I remove it</b> &mdash; <code>localStorage</code>, survives closing the browser.</li>
+  <li><b>Only until I close this tab</b> &mdash; <code>sessionStorage</code>, gone the moment the tab closes.</li>
+</ul>
+
+<p>
+  <b>Forget key</b> erases it from both immediately. And because an intervals.icu
+  key only ever grants access to your own account, you can revoke it outright at
+  <a href="https://intervals.icu/settings" target="_blank" rel="noopener">intervals.icu &rarr; Settings &rarr; Developer</a>
+  at any time, which invalidates it everywhere regardless of what any application
+  has done with it.
+</p>
+
+<h3>Everything else</h3>
+
+<ul>
+  <li><b>Your races</b> are stored in this browser's IndexedDB. They are never uploaded anywhere.</li>
+  <li><b>Open-Meteo</b> receives the rounded coordinates and date of the race, to return the weather. Nothing else, and no key is involved &mdash; the service needs no account.</li>
+  <li><b>Overpass / OpenStreetMap</b> receives the bounding box of the circuit, to return roads and buildings. Nothing else.</li>
+  <li>Neither is told who you are, because CritLab does not know.</li>
+  <li>Everything stored locally can be wiped from <b>Settings</b>: races under <b>Delete all stored races</b>, map data under <b>Clear cached map data</b>, the key under <b>Forget key</b>.</li>
+</ul>
+
+<p>
+  You do not have to take any of this on faith. The whole application is a
+  handful of readable JavaScript files with no build step and no minification:
+  open your browser's devtools, watch the network tab while you load a ride, and
+  you will see exactly three hosts &mdash; intervals.icu, Open-Meteo and
+  Overpass &mdash; and nothing else.
+</p>
+
+<h2>The sample race</h2>
+
+<p>
+  <b>Load sample race</b> generates a synthetic crit rather than shipping a
+  recording: a 25-lap, 1.07 km four-corner circuit simulated forward through the
+  same power model CritLab runs in reverse, with a real wind, a braking and
+  accelerating speed profile that respects corner radii, and a positioning leak
+  deliberately planted on the windward straight for 11 of the 25 laps. The
+  analyser finds it. It carries no date on purpose, so there is no weather to
+  fetch and the wind gets inferred — which is the case worth seeing.
+</p>
+
+<h2>Caveats worth repeating</h2>
+
+<ul>
+  <li>Absolute exposure percentages depend on the CdA assumption. Treat them as a scale, not a measurement.</li>
+  <li>Inferred wind on a course with few bearings can be tens of degrees out. CritLab flags this when it applies.</li>
+  <li>Draft ratio cannot distinguish "sheltered" from "freewheeling downhill in a bunch" — both look like cheap watts, because both are.</li>
+  <li>A ratio above 1.0 is not always exposure; hard acceleration produces the same signature. That is why the surge ledger and the corner view exist separately.</li>
+  <li>Weather is a grid cell, not your start-finish straight. On a sheltered industrial-park circuit the roughness setting matters more than the wind speed does.</li>
+</ul>
+
+<p style="margin-top:32px">
+  <a href="{{ '/' | relative_url }}">← Back to the analyser</a>
+</p>
+
+</div>

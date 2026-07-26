@@ -1,0 +1,19 @@
+title: CritLab
+description: Criterium race analysis from FIT files, intervals.icu and historical weather
+baseurl: "/CritLab"
+url: "https://noahpaladino.com"
+
+plugins:
+  - jekyll-seo-tag
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - CLAUDE.md
+  - package.json
+  - package-lock.json
+  - node_modules/
+  - vendor/
+  - reference/
+  - test/

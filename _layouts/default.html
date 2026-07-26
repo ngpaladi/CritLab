@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}</title>
+  <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
+  {% seo %}
+</head>
+<body>
+  <header class="site-header">
+    <a href="{{ '/' | relative_url }}" class="site-title">Crit<span>Lab</span></a>
+    <nav class="site-nav">
+      <a href="{{ '/' | relative_url }}" {% if page.url == '/' %}class="active"{% endif %}>Analyze</a>
+      <a href="{{ '/about.html' | relative_url }}" {% if page.url contains 'about' %}class="active"{% endif %}>About</a>
+    </nav>
+    <div class="header-spacer"></div>
+    <button id="settings-btn" class="settings-btn" aria-label="Settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <main>
+    {{ content }}
+  </main>
+
+  <!-- Settings drawer -->
+  <div id="settings-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="modal-overlay" id="settings-overlay"></div>
+    <div class="drawer">
+      <div class="drawer-head">
+        <span>Settings</span>
+        <button id="settings-close" class="drawer-close" aria-label="Close">&#215;</button>
+      </div>
+      <div class="drawer-body">
+
+        <div class="settings-section">
+          <div class="settings-section-title">intervals.icu</div>
+
+          <div class="privacy-callout">
+            <div class="privacy-callout-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              CritLab never receives your API key
+            </div>
+            <p>
+              There is no CritLab server. This is a static page: the only place your key
+              is ever sent is <b>intervals.icu itself</b>, directly from your browser,
+              in the request that fetches your rides. It is not transmitted anywhere
+              else, not to us, and not to any third party &mdash; there is nowhere for
+              it to go.
+            </p>
+            <p>
+              It is kept in this browser's storage so you don't have to paste it every
+              visit. You can make that last only until you close the tab, or remove it
+              entirely, below.
+            </p>
+          </div>
+
+          <p class="hint">
+            Generate a key under <code>Settings &rarr; Developer</code> on
+            <a href="https://intervals.icu/settings" target="_blank" rel="noopener">intervals.icu</a>.
+            It only ever grants access to your own account, and you can revoke it there
+            at any time.
+          </p>
+
+          <div class="settings-row">
+            <label for="icu-key">API key</label>
+            <input type="password" id="icu-key" placeholder="paste API key" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label for="icu-athlete">Athlete ID <span style="opacity:.7">(blank = the key's own athlete)</span></label>
+            <input type="text" id="icu-athlete" placeholder="0" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label for="icu-persist">Keep the key</label>
+            <select id="icu-persist">
+              <option value="local">In this browser, until I remove it</option>
+              <option value="session">Only until I close this tab</option>
+            </select>
+          </div>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-primary btn-sm" id="icu-save">Save &amp; test</button>
+            <button class="btn btn-sm" id="icu-clear">Forget key</button>
+          </div>
+          <div id="icu-status" class="status status-info" style="display:none"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Weather</div>
+          <p class="hint">
+            Historical conditions come from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
+            (keyless, no account). CritLab sends only the race's rounded coordinates and date.
+          </p>
+          <label class="check"><input type="checkbox" id="wx-auto" checked><span>Fetch weather automatically when a race loads</span></label>
+          <div class="settings-row">
+            <label for="wx-roughness">Surface roughness <span style="opacity:.7">(10&nbsp;m &rarr; rider height)</span></label>
+            <select id="wx-roughness">
+              <option value="0.03">Open field / airport (z&#8320; 0.03&nbsp;m)</option>
+              <option value="0.1" selected>Open with scattered obstacles (0.1&nbsp;m)</option>
+              <option value="0.25">Industrial park / hedgerows (0.25&nbsp;m)</option>
+              <option value="0.5">Suburban, buildings both sides (0.5&nbsp;m)</option>
+              <option value="1.0">Downtown crit, tall buildings (1.0&nbsp;m)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Map</div>
+          <p class="hint">
+            The circuit map can draw roads and buildings from
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+            underneath your track, fetched once per circuit and cached in this browser.
+            Only the bounding box of the ride is sent.
+          </p>
+          <label class="check"><input type="checkbox" id="osm-enabled" checked><span>Draw an OpenStreetMap basemap</span></label>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-sm" id="osm-clear">Clear cached map data</button>
+          </div>
+          <div id="osm-status" class="status status-info" style="display:none"></div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Stored data</div>
+          <p class="hint">Races are kept in this browser's IndexedDB. Nothing is uploaded anywhere.</p>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-sm" id="data-clear">Delete all stored races</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ '/assets/js/Intervals.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/RideStore.js' | relative_url }}"></script>
+  {% if page.app %}
+  <script src="{{ '/assets/js/Fit.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Weather.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Osm.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Physics.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Analyzer.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Charts.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Demo.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/app.js' | relative_url }}"></script>
+  {% endif %}
+
+  <script>
+  /* Settings drawer — available on every page, depends only on Settings + Intervals. */
+  (function () {
+    'use strict';
+
+    var modal   = document.getElementById('settings-modal');
+    var keyEl   = document.getElementById('icu-key');
+    var athEl   = document.getElementById('icu-athlete');
+    var statusEl= document.getElementById('icu-status');
+    var autoEl  = document.getElementById('wx-auto');
+    var persistEl = document.getElementById('icu-persist');
+    var roughEl = document.getElementById('wx-roughness');
+
+    function say(kind, msg) {
+      statusEl.className = 'status status-' + kind;
+      statusEl.textContent = msg;
+      statusEl.style.display = '';
+    }
+
+    function open() {
+      var s = Settings.all();
+      keyEl.value   = Settings.getIcuKey() || '';
+      athEl.value   = s.icuAthlete || '';
+      persistEl.value = s.icuKeyPersist || 'local';
+      autoEl.checked = s.wxAuto !== false;
+      roughEl.value  = String(s.wxRoughness || 0.1);
+      document.getElementById('osm-enabled').checked = s.osmBasemap !== false;
+      statusEl.style.display = 'none';
+      modal.style.display = '';
+      keyEl.focus();
+    }
+    function close() { modal.style.display = 'none'; }
+
+    document.getElementById('settings-btn').addEventListener('click', open);
+    document.getElementById('settings-close').addEventListener('click', close);
+    document.getElementById('settings-overlay').addEventListener('click', close);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal.style.display !== 'none') close();
+    });
+
+    document.getElementById('icu-save').addEventListener('click', async function () {
+      var key = keyEl.value.trim();
+      var ath = athEl.value.trim();
+      if (!key) { say('err', 'Paste an API key first.'); return; }
+      say('info', 'Contacting intervals.icu…');
+      try {
+        var athlete = await Intervals.testKey(key, ath || '0');
+        Settings.set({
+          icuKey: key, icuAthlete: ath, icuAthleteName: athlete.name || '',
+          icuKeyPersist: persistEl.value,
+        });
+        var bits = ['Connected as ' + (athlete.name || 'athlete ' + athlete.id)];
+        if (athlete.ftp)    bits.push('FTP ' + athlete.ftp + ' W');
+        if (athlete.weight) bits.push(athlete.weight.toFixed(1) + ' kg');
+        say('ok', bits.join(' · '));
+        window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { icu: true } }));
+      } catch (err) {
+        say('err', String(err.message || err));
+      }
+    });
+
+    persistEl.addEventListener('change', function () {
+      Settings.set({ icuKeyPersist: persistEl.value });
+      say('info', persistEl.value === 'session'
+        ? 'The key will be dropped when you close this tab.'
+        : 'The key will be remembered in this browser.');
+    });
+
+    document.getElementById('icu-clear').addEventListener('click', function () {
+      Settings.forgetIcuKey();
+      Settings.set({ icuAthlete: '', icuAthleteName: '' });
+      keyEl.value = ''; athEl.value = '';
+      say('ok', 'Key erased from this browser. Nothing to revoke elsewhere — it was never sent anywhere but intervals.icu.');
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { icu: true } }));
+    });
+
+    autoEl.addEventListener('change', function () {
+      Settings.set({ wxAuto: autoEl.checked });
+    });
+
+    var osmEl = document.getElementById('osm-enabled');
+    var osmStatus = document.getElementById('osm-status');
+    osmEl.addEventListener('change', function () {
+      Settings.set({ osmBasemap: osmEl.checked });
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { osm: true } }));
+    });
+    document.getElementById('osm-clear').addEventListener('click', function () {
+      if (typeof Osm !== 'undefined') Osm.clearCache();
+      osmStatus.className = 'status status-ok';
+      osmStatus.textContent = 'Cached map data cleared.';
+      osmStatus.style.display = '';
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { osm: true } }));
+    });
+    roughEl.addEventListener('change', function () {
+      Settings.set({ wxRoughness: parseFloat(roughEl.value) });
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { weather: true } }));
+    });
+
+    document.getElementById('data-clear').addEventListener('click', async function () {
+      if (!confirm('Delete every race stored in this browser? This cannot be undone.')) return;
+      await RideStore.clear();
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { cleared: true } }));
+      say('ok', 'Stored races deleted.');
+    });
+  })();
+  </script>
+</body>
+</html>

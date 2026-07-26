@@ -1,0 +1,17 @@
+{
+  "name": "critlab",
+  "version": "1.0.0",
+  "description": "Criterium race analysis from FIT files, intervals.icu and historical weather",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/harness.js && node test/dom.js",
+    "test:unit": "node test/harness.js",
+    "test:dom": "node test/dom.js",
+    "test:live": "node test/live.js",
+    "serve": "bundle exec jekyll serve --livereload"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}
