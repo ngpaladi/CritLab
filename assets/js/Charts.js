@@ -662,15 +662,10 @@ const Charts = (() => {
       g.moveTo(px - nx * L, py - ny * L);
       g.lineTo(px + nx * L, py + ny * L);
       g.stroke();
-      g.fillStyle = manual ? '#fab219' : INK.text;
-      g.font = '600 9px system-ui, -apple-system, sans-serif';
-      g.textAlign = 'center';
-      g.textBaseline = 'bottom';
-      g.strokeStyle = INK.surface;
-      g.lineWidth = 3;
-      const label = manual ? 'START/FINISH' : 'lap split';
-      g.strokeText(label, px, py - L - 3);
-      g.fillText(label, px, py - L - 3);
+      // No label either way. The mark reads as a line across the road, which is
+      // what it is; colour alone carries whether the rider placed it (gold) or
+      // it is the automatic default (white), and the map subtitle says so in
+      // words for anyone who needs it spelled out.
       g.restore();
     }
 
