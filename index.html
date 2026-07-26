@@ -47,6 +47,19 @@ app: true
         </div>
 
         <div id="icu-results" style="margin-top:8px"></div>
+
+        <details class="icu-byid">
+          <summary>Load by ID or URL</summary>
+          <p class="hint" style="margin:6px 0">
+            For an activity that doesn't show up in the list — paste its
+            intervals.icu URL or ID.
+          </p>
+          <input type="text" id="icu-id" placeholder="i169128502 or a full URL" autocomplete="off" spellcheck="false">
+          <div class="btn-row" style="margin-top:6px">
+            <button class="btn btn-sm" id="icu-id-load">Load it</button>
+          </div>
+          <div id="icu-id-status"></div>
+        </details>
       </div>
     </div>
 
@@ -394,6 +407,16 @@ app: true
 
     </div>
   </aside>
+</div>
+
+<div class="busy-overlay" id="busy-overlay" hidden>
+  <div class="busy-card">
+    <div class="busy-spinner" aria-hidden="true"></div>
+    <div>
+      <div class="busy-msg" id="busy-msg">Working…</div>
+      <div class="busy-sub" id="busy-sub"></div>
+    </div>
+  </div>
 </div>
 
 <nav class="mobile-nav">

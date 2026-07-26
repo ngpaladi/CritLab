@@ -668,3 +668,66 @@ table.data td.dim { color: var(--text-muted); }
 .ride-refresh:hover { color: var(--accent); }
 .ride-refresh.spinning { opacity: 1; animation: cl-spin 0.9s linear infinite; }
 @keyframes cl-spin { to { transform: rotate(360deg); } }
+
+/* ── Load by ID ─────────────────────────────────────────────────────────── */
+
+.icu-byid { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.icu-byid summary {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+.icu-byid summary::-webkit-details-marker { display: none; }
+.icu-byid summary::before { content: '▸ '; }
+.icu-byid[open] summary::before { content: '▾ '; }
+.icu-byid summary:hover { color: var(--text); }
+
+/* ── Loading overlay ────────────────────────────────────────────────────── */
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 17, 23, .62);
+  backdrop-filter: blur(2px);
+  animation: cl-fade .16s ease-out;
+}
+.busy-overlay[hidden] { display: none; }
+
+@keyframes cl-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.busy-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+  min-width: 240px;
+}
+
+.busy-spinner {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 2.5px solid var(--surface3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cl-spin 0.75s linear infinite;
+}
+
+.busy-msg { font-size: 13.5px; font-weight: 600; }
+.busy-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+/* Respect a reduced-motion preference: keep the feedback, drop the spin. */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner { animation: none; border-top-color: var(--accent); opacity: .8; }
+  .busy-overlay { animation: none; }
+  .ride-refresh.spinning { animation: none; }
+}

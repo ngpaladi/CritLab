@@ -19,7 +19,7 @@
     cmpMetric: 'exposed',
     replay: { idx: 0, timer: null },
     busy: false,
-    icu: { activities: [], filters: { race: true, power: true, gps: true, tags: new Set() }, search: '' },
+    icu: { activities: [], skipped: [], filters: { race: true, power: true, gps: true, tags: new Set() }, search: '' },
   };
 
   // Rail controls: id suffix → { fmt, parse }
@@ -78,7 +78,8 @@
     return entry;
   }
 
-  async function loadRaw(raw, { persist = true } = {}) {
+  async function loadRaw(raw, opts = {}) {
+    const { persist = true } = opts;
     setBusy(true, 'Preparing…');
     try {
       const entry = addRace(raw);
@@ -90,7 +91,9 @@
       renderRaceList();
       await select(entry.id);
     } catch (err) {
-      alert(String(err.message || err));
+      // Callers that show their own status (load-by-ID, the activity list)
+      // pass `quiet` so the message is not delivered twice.
+      if (!opts.quiet) alert(String(err.message || err));
       throw err;
     } finally {
       setBusy(false);
@@ -389,6 +392,8 @@
     });
 
     $('icu-fetch').addEventListener('click', fetchIcuList);
+    $('icu-id-load').addEventListener('click', loadIcuById);
+    $('icu-id').addEventListener('keydown', e => { if (e.key === 'Enter') loadIcuById(); });
     $('icu-search').addEventListener('input', e => {
       state.icu.search = e.target.value;
       renderIcuResults();
@@ -440,7 +445,13 @@
         oldest: $('icu-from').value,
         newest: $('icu-to').value,
       });
+      // Anything that is not a ride gets set aside rather than dropped, so a
+      // race that is missing from the list is visible as a problem instead of
+      // simply not being there. intervals.icu does emit placeholder records —
+      // a Strava sync that never completed, for instance — with no type, no
+      // name and no metrics, and those are exactly the ones worth surfacing.
       state.icu.activities = list.filter(Intervals.isRide);
+      state.icu.skipped = list.filter(a => !Intervals.isRide(a));
       $('icu-filters').style.display = state.icu.activities.length ? '' : 'none';
       renderIcuChips();
       renderIcuResults();
@@ -527,6 +538,22 @@
     head.textContent = rides.length + ' of ' + total + ' rides';
     out.appendChild(head);
 
+    // Placeholder records from intervals.icu. Never hide these silently: when
+    // one of them is the ride you are looking for, an empty list is impossible
+    // to diagnose from the outside.
+    const skipped = state.icu.skipped || [];
+    if (skipped.length) {
+      const warn = document.createElement('div');
+      warn.className = 'status status-warn';
+      warn.style.marginBottom = '6px';
+      warn.innerHTML = skipped.length + ' entr' + (skipped.length === 1 ? 'y' : 'ies') +
+        ' on intervals.icu ' + (skipped.length === 1 ? 'has' : 'have') +
+        ' no activity type or metrics — usually an incomplete sync from another ' +
+        'service. ' + skipped.map(a => (a.start || '').slice(0, 10)).join(', ') +
+        '. If a race is missing, that is probably it.';
+      out.appendChild(warn);
+    }
+
     for (const a of rides) {
       const row = document.createElement('div');
       row.className = 'ride-item';
@@ -557,6 +584,49 @@
         }
       });
       out.appendChild(row);
+    }
+  }
+
+  /**
+   * Load a specific activity by id or URL.
+   *
+   * intervals.icu does not always list everything it holds — an activity that
+   * lost a de-duplication contest is still fetchable, just invisible in the
+   * date-range listing. This is the escape hatch for that.
+   */
+  function parseActivityRef(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    const m = raw.match(/activities?\/([a-z0-9]+)/i) || raw.match(/^(i?\d+)$/i);
+    return m ? m[1] : null;
+  }
+
+  async function loadIcuById() {
+    const out = $('icu-id-status');
+    const key = Settings.get('icuKey');
+    const id = parseActivityRef($('icu-id').value);
+
+    out.innerHTML = '';
+    const say = (kind, msg) => {
+      out.innerHTML = '<div class="status status-' + kind + '" style="margin-top:6px">' +
+        Charts.esc(msg) + '</div>';
+    };
+
+    // Validate what was just typed before complaining about configuration: it
+    // is the thing the user most recently acted on, and the check is free.
+    if (!id) { say('err', 'That does not look like an activity ID or URL.'); return; }
+    if (!key) { say('warn', 'No API key saved. Press Key above to add one.'); return; }
+
+    say('info', 'Fetching ' + id + '…');
+    setBusy(true, 'Fetching activity ' + id + '…');
+    try {
+      await loadRaw(await Intervals.loadRide(id, key));
+      say('ok', 'Loaded.');
+      $('icu-id').value = '';
+    } catch (err) {
+      say('err', String(err.message || err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -665,11 +735,58 @@
 
   const DROPZONE_IDLE = 'Drop a <b>.fit</b> or <b>.json</b> file<br>or click to choose';
 
+  /**
+   * Busy state.
+   *
+   * Reference counted, because more than one thing runs at once — weather and
+   * the basemap are fetched in parallel, and whichever finished first used to
+   * clear the flag while the other was still going.
+   *
+   * The overlay waits a moment before appearing: most work here finishes in
+   * well under that, and flashing a modal for 80 ms reads as a glitch. Past
+   * that threshold the user needs to know the page is working rather than
+   * broken, which is the whole point.
+   */
+  let busyDepth = 0, busyTimer = null, busyMsg = '', busyStart = 0, busySubTimer = null;
+  const BUSY_DELAY_MS = 180;
+
   function setBusy(on, msg) {
-    state.busy = on;
+    if (on) {
+      busyDepth++;
+      if (msg) busyMsg = msg;
+    } else {
+      busyDepth = Math.max(0, busyDepth - 1);
+    }
+    state.busy = busyDepth > 0;
+
     const dz = $('dropzone');
-    dz.innerHTML = on && msg ? Charts.esc(msg) : DROPZONE_IDLE;
-    dz.style.opacity = on ? '0.6' : '';
+    if (dz) {
+      dz.innerHTML = busyDepth > 0 && busyMsg ? Charts.esc(busyMsg) : DROPZONE_IDLE;
+      dz.style.opacity = busyDepth > 0 ? '0.6' : '';
+    }
+
+    const overlay = $('busy-overlay');
+    if (!overlay) return;
+
+    if (busyDepth > 0) {
+      $('busy-msg').textContent = busyMsg || 'Working…';
+      if (!busyTimer && overlay.hidden) {
+        busyStart = Date.now();
+        busyTimer = setTimeout(() => {
+          overlay.hidden = false;
+          // If it drags on, say so rather than leaving a bare spinner.
+          busySubTimer = setTimeout(() => {
+            $('busy-sub').textContent = 'Still going — a slow network or a busy public API.';
+          }, 5000);
+        }, BUSY_DELAY_MS);
+      }
+    } else {
+      clearTimeout(busyTimer); busyTimer = null;
+      clearTimeout(busySubTimer); busySubTimer = null;
+      overlay.hidden = true;
+      $('busy-sub').textContent = '';
+      busyMsg = '';
+    }
   }
 
   function renderEmpty() {

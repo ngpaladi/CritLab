@@ -458,6 +458,41 @@ async function settle(ms = 250) {
       $('icu-filters').style.display === 'none', $('icu-filters').style.display);
     check('search box present', !!$('icu-search'));
     check('90-day shortcut present', !!$('icu-range-90'));
+    check('load-by-ID escape hatch present', !!$('icu-id') && !!$('icu-id-load'));
+  }
+
+  {
+    // Load-by-ID must validate before it hits the network.
+    $('icu-id').value = 'not an id';
+    $('icu-id-load').dispatchEvent(new window.Event('click'));
+    await settle(200);
+    check('a malformed activity reference is rejected clearly',
+      /does not look like/.test($('icu-id-status').textContent),
+      $('icu-id-status').textContent.slice(0, 60));
+
+    // A full intervals.icu URL must be accepted and reduced to its id.
+    $('icu-id').value = 'https://intervals.icu/activities/i169128502';
+    $('icu-id-load').dispatchEvent(new window.Event('click'));
+    await settle(300);
+    check('a full URL is parsed past validation (then blocked on the missing key)',
+      /No API key/.test($('icu-id-status').textContent),
+      $('icu-id-status').textContent.slice(0, 70));
+  }
+
+  {
+    // The loading overlay: hidden at rest, shown while work is in flight.
+    const overlay = $('busy-overlay');
+    check('loading overlay exists and is hidden at rest', overlay && overlay.hidden === true);
+
+    // Driving it through a real load is the only honest test of the counter.
+    const seen = { shown: false };
+    const obs = setInterval(() => { if (!overlay.hidden) seen.shown = true; }, 20);
+    $('demo-btn').dispatchEvent(new window.Event('click'));
+    for (let i = 0; i < 40 && !window.CritLab.state.races.length; i++) await settle(50);
+    await settle(600);
+    clearInterval(obs);
+    check('overlay is hidden again once work finishes', overlay.hidden === true);
+    check('busy counter unwound to zero', window.CritLab.state.busy === false);
   }
 
   {

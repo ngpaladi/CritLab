@@ -199,7 +199,16 @@ const Intervals = (() => {
   function toRide(activity, streams) {
     const time = streams.time;
     if (!Array.isArray(time) || !time.length) {
-      throw new Error('This activity has no time stream on intervals.icu.');
+      // An activity can exist on intervals.icu as a summary with no sample data
+      // behind it — most often when a duplicate arrived from another source and
+      // the streams were dropped during de-duplication. The summary still
+      // reports `stream_types`, so this is not detectable before asking.
+      throw new Error(
+        'intervals.icu has no sample data for this activity — the summary is ' +
+        'there but the streams come back empty. This usually means it was ' +
+        'de-duplicated against another copy (often a Strava sync). Fix it on ' +
+        'intervals.icu, or drag the .fit file in here instead.'
+      );
     }
     const n = time.length;
 
