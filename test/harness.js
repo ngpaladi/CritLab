@@ -555,6 +555,50 @@ check('finale summarised', isFinite(A.finale.exposed) && isFinite(A.finale.wbalA
   A.finale.basis + ': ' + A.finale.exposed.toFixed(0) + '% exposed, ' +
   A.finale.wbalAtStartPct.toFixed(0) + '% W′ left');
 
+// A rider-placed start/finish line must win over every heuristic, and must
+// actually move the laps, the corner numbering and the sectors with it.
+{
+  const before = A.lapBounds[0].i0;
+  // Pick a point roughly a third of the way round the first lap.
+  const target = A.lapBounds[0].i0 +
+    Math.round((A.lapBounds[0].i1 - A.lapBounds[0].i0) * 0.35);
+  const anchor = { lat: P.lat[target], lon: P.lon[target] };
+
+  const cfgM = RideStore.configFor(P, { startAnchor: anchor });
+  cfgM.rho = cfg.rho; cfgM.windSource = 'manual'; cfgM.windSpeed = 0;
+  const Am = Analyzer.run(P, cfgM);
+
+  check('a placed start/finish line is used', Am.lapBounds[0].source === 'manual',
+    'lap source: ' + Am.lapBounds[0].source);
+  check('and it actually moves the lap boundary',
+    Math.abs(Am.lapBounds[0].i0 - target) < 15 && Am.lapBounds[0].i0 !== before,
+    'lap 1 now starts at ' + Am.lapBounds[0].i0 + ' (asked for ' + target +
+    ', was ' + before + ')');
+  check('lap count survives the move',
+    Math.abs(Am.summary.laps - A.summary.laps) <= 2,
+    Am.summary.laps + ' laps vs ' + A.summary.laps);
+  check('corners are renumbered from the new line',
+    Am.turns.length === A.turns.length &&
+    Am.turns.every(t => isFinite(t.firstSeen)),
+    Am.turns.map(t => t.name).join(', '));
+  check('sector labels still form a closed chain',
+    !Am.sectors || Am.sectors.labels.every((l, k) => {
+      const to = l.match(/→T(\d+)$/)[1];
+      const nextFrom = Am.sectors.labels[(k + 1) % Am.sectors.labels.length].match(/^T(\d+)/)[1];
+      return to === nextFrom;
+    }), Am.sectors ? Am.sectors.labels.join(' ') : 'no sectors');
+
+  // A point off the circuit must be refused, not silently accepted.
+  const cfgBad = RideStore.configFor(P, {
+    startAnchor: { lat: P.lat[0] + 0.02, lon: P.lon[0] + 0.02 },
+  });
+  cfgBad.rho = cfg.rho; cfgBad.windSource = 'manual'; cfgBad.windSpeed = 0;
+  const Ab = Analyzer.run(P, cfgBad);
+  check('a start line placed off the course is rejected',
+    Ab.lapBounds[0].source !== 'manual',
+    'fell back to: ' + Ab.lapBounds[0].source);
+}
+
 // Elevation closure — the check that guards the gravity term the CdA fit
 // depends on. A circuit returns to the same height every lap; if the recorded
 // altitude does not, the gradient is partly barometric weather.

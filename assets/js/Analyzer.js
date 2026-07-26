@@ -163,11 +163,25 @@ const Analyzer = (() => {
   function detectLaps(P, cfg) {
     const whole = [{ i0: 0, i1: P.n - 1, source: 'none' }];
 
-    const fromDevice = lapsFromMarkers(P);
-    if (fromDevice) return fromDevice;
     if (!P.lat) return whole;
 
-    // Try the start line first, then progressively later points on the track.
+    // A start/finish line the rider placed themselves wins over everything.
+    // It is a painted line on a road: nothing in a GPS trace identifies it, and
+    // guessing from where the recording happened to begin puts it wherever the
+    // head unit was switched on — the staging area, the back of the grid, the
+    // car park. When the rider has said where it is, use it.
+    if (cfg.startAnchor && isFinite(cfg.startAnchor.lat)) {
+      const idx = nearestTrackIndex(P, cfg.startAnchor.lat, cfg.startAnchor.lon);
+      if (idx >= 0) {
+        const laps = lapsFromAnchor(P, idx, cfg);
+        if (laps) { laps.forEach(l => { l.source = 'manual'; }); return laps; }
+      }
+    }
+
+    const fromDevice = lapsFromMarkers(P);
+    if (fromDevice) return fromDevice;
+
+    // Otherwise try the start of the recording, then later points on the track.
     // The first candidate that yields a coherent set of laps wins, so lap 1
     // begins where the rider began whenever that is a place they come back to.
     for (const anchor of anchorCandidates(P)) {
@@ -175,6 +189,19 @@ const Analyzer = (() => {
       if (laps) return laps;
     }
     return whole;
+  }
+
+  /** Index of the moving track sample closest to a lat/lon, or -1. */
+  function nearestTrackIndex(P, lat, lon) {
+    if (!P.lat) return -1;
+    const mLat = 111320, mLon = 111320 * Math.cos(lat * Math.PI / 180);
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < P.n; i++) {
+      if (!P.moving[i] || (!P.lat[i] && !P.lon[i])) continue;
+      const d = Math.hypot((P.lon[i] - lon) * mLon, (P.lat[i] - lat) * mLat);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return bestD < 120 ? best : -1;
   }
 
   /**
@@ -1256,7 +1283,7 @@ const Analyzer = (() => {
   function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 
   return {
-    run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, detectTurns, buildSectors, detectSurges,
+    run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, nearestTrackIndex, detectTurns, buildSectors, detectSurges,
     exposureByHeading, elevationClosure, compareRow, angleDelta, R_EARTH,
     buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };

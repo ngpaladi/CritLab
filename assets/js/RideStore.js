@@ -479,6 +479,7 @@ const RideStore = (() => {
       'id', 'name', 'source', 'sourceId', 'startTime', 'sport', 'n',
       't', 'lat', 'lon', 'alt', 'v', 'watts', 'hr', 'cad', 'dist', 'temp',
       'lapTimes', 'ftp', 'weightKg', 'cp', 'wPrime', 'totals', 'device', 'savedAt',
+      'startAnchor',
     ];
     const out = {};
     for (const k of keep) if (ride[k] !== undefined) out[k] = toPlain(ride[k]);
@@ -521,6 +522,7 @@ const RideStore = (() => {
       ftp, cp,
       wPrime: pickNum(overrides && overrides.wPrime, P.wPrime, s.wPrime),
 
+      startAnchor: (overrides && overrides.startAnchor) || null,
       windSource: (overrides && overrides.windSource) || s.windSource,
       windSpeed: pickNum(overrides && overrides.windSpeed, s.windSpeed),
       windDir: pickNum(overrides && overrides.windDir, s.windDir),

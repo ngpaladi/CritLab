@@ -213,6 +213,24 @@ async function settle(ms = 250) {
     /no basemap|basemap off/.test($('map-sub').textContent) || $('map-sub').textContent === '',
     $('map-sub').textContent);
 
+  // Start/finish placement UI.
+  {
+    check('start/finish controls present', !!$('pick-start') && !!$('reset-start'));
+    check('reset hidden until a line is placed', $('reset-start').style.display === 'none');
+    const before = errors.length;
+    $('pick-start').dispatchEvent(new window.Event('click'));
+    await settle(200);
+    check('entering pick mode shows the instruction',
+      $('pick-hint').style.display === '' && /Click the point/.test($('pick-hint').textContent));
+    check('the button becomes a cancel', /Cancel/.test($('pick-start').textContent),
+      $('pick-start').textContent);
+    $('pick-start').dispatchEvent(new window.Event('click'));
+    await settle(200);
+    check('cancelling leaves pick mode', $('pick-hint').style.display === 'none');
+    check('pick mode renders without error', errors.length === before,
+      errors.slice(before).join(' | ').slice(0, 150));
+  }
+
   clickTab('laps'); await settle(150);
   const lapRows = $('lap-table').querySelectorAll('tbody tr');
   check('lap table populated', lapRows.length >= 20, lapRows.length + ' rows');

@@ -142,8 +142,22 @@ app: true
               <span class="card-title">Circuit, coloured by exposure</span>
               <span class="card-sub" id="map-sub"></span>
             </div>
+            <div class="btn-row" style="margin-bottom:8px">
+              <button class="btn btn-sm" id="pick-start">Set start/finish line</button>
+              <button class="btn btn-sm" id="reset-start" style="display:none">Back to automatic</button>
+            </div>
+            <div id="pick-hint" class="status status-info" style="display:none">
+              Click the point on the circuit where the start/finish line is. Laps,
+              corner numbering and sectors will all be measured from there.
+            </div>
             <div class="chart-wrap"><canvas class="chart" id="map-main"></canvas></div>
             <div class="legend" id="map-legend"></div>
+            <p class="card-note">
+              CritLab starts laps where your recording did, which is wherever you pressed
+              start — the staging area, the back of the grid. The actual start/finish is a
+              painted line on the road and nothing in a GPS trace identifies it, so if it
+              matters, place it yourself.
+            </p>
           </div>
           <div class="card">
             <div class="card-head"><span class="card-title">Exposure by direction of travel</span></div>

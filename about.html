@@ -107,11 +107,22 @@ title: About
 <h2>Laps, corners and sectors</h2>
 
 <p>
-  Laps come from your head unit's lap markers when they look like a circuit,
-  and otherwise from repeated passes of a start anchor, gated on heading so an
-  out-and-back section cannot fire a false lap. If the detected laps are not
-  near-identical in length, CritLab decides it is not looking at a circuit and
-  says so rather than inventing structure.
+  Laps come from repeated passes of one point on the circuit, gated on heading
+  so an out-and-back section cannot fire a false lap. If the detected laps are
+  not near-identical in length, CritLab decides it is not looking at a circuit
+  and says so rather than inventing structure.
+</p>
+
+<p>
+  <b>Where that point sits is worth being honest about.</b> By default it is
+  where your recording started moving — which is wherever you pressed start:
+  the staging area, the back of the grid, the far end of the car park. The
+  actual start/finish line is paint on a road, and nothing in a GPS trace
+  identifies it. No heuristic can find it, so CritLab does not pretend to.
+  Instead, <b>click <em>Set start/finish line</em> on the circuit map and put it
+  where it belongs</b>; laps, corner numbering and sectors are all measured from
+  there, and the choice is saved with the race. A point you do not cross every
+  lap is refused rather than quietly accepted.
 </p>
 
 <p>

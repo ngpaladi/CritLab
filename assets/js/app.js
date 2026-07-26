@@ -19,6 +19,7 @@
     cmpMetric: 'exposed',
     replay: { idx: 0, timer: null },
     busy: false,
+    pickingStart: false,
     icu: { activities: [], skipped: [], filters: { race: true, power: true, gps: true, tags: new Set() }, search: '' },
   };
 
@@ -46,6 +47,7 @@
     bindTabs();
     bindLoaders();
     bindReplay();
+    bindStartLine();
     bindWindow();
     syncRailFromSettings();
     initDates();
@@ -181,7 +183,7 @@
     const P = entry.P;
     const s = Settings.all();
 
-    const cfg = RideStore.configFor(P, {});
+    const cfg = RideStore.configFor(P, { startAnchor: entry.raw.startAnchor || null });
     const dens = RideStore.airDensityFor(P, entry.wx, cfg);
     cfg.rho = dens.rho;
     cfg.conditions = dens;
@@ -1145,7 +1147,15 @@
         break;
 
       case 'circuit':
-        Charts.circuitMap($('map-main'), P, A, { height: 400, osm: basemap(entry) });
+        Charts.circuitMap($('map-main'), P, A, {
+          height: 400,
+          osm: basemap(entry),
+          onPick: state.pickingStart ? pt => setStartLine(entry, pt) : null,
+        });
+        $('pick-start').textContent = state.pickingStart
+          ? 'Cancel' : (entry.raw.startAnchor ? 'Move start/finish line' : 'Set start/finish line');
+        $('pick-hint').style.display = state.pickingStart ? '' : 'none';
+        $('reset-start').style.display = entry.raw.startAnchor ? '' : 'none';
         Charts.exposureRose($('rose'), A, { height: 260 });
         Charts.sectorHeatmap($('heatmap'), A);
         $('map-legend').innerHTML = ratioLegend();
@@ -1189,14 +1199,57 @@
     }
   }
 
+  /**
+   * Place the start/finish line. Persisted with the ride, because it is a fact
+   * about the course that the rider knows and the data does not — it should not
+   * have to be re-entered every time the race is opened.
+   */
+  async function setStartLine(entry, pt) {
+    entry.raw.startAnchor = { lat: pt.lat, lon: pt.lon };
+    state.pickingStart = false;
+    try { await RideStore.put(entry.raw); } catch (_) {}
+    recompute();
+    const A = entry.A;
+    if (A && A.lapBounds && A.lapBounds[0] && A.lapBounds[0].source !== 'manual') {
+      // The click landed somewhere the rider does not pass often enough for it
+      // to define a lap. Say so rather than silently ignoring it.
+      alert('That point does not work as a start/finish line — the ride does not ' +
+        'pass it often enough, or the laps it produces are inconsistent. ' +
+        'Try a point on the main circuit that you crossed every lap.');
+      entry.raw.startAnchor = null;
+      try { await RideStore.put(entry.raw); } catch (_) {}
+      recompute();
+    }
+  }
+
+  function bindStartLine() {
+    $('pick-start').addEventListener('click', () => {
+      const entry = current();
+      if (!entry || !entry.P || !entry.P.hasGps) return;
+      state.pickingStart = !state.pickingStart;
+      renderActivePanel();
+    });
+    $('reset-start').addEventListener('click', async () => {
+      const entry = current();
+      if (!entry) return;
+      entry.raw.startAnchor = null;
+      state.pickingStart = false;
+      try { await RideStore.put(entry.raw); } catch (_) {}
+      recompute();
+    });
+  }
+
   function mapSubtitle(entry) {
-    if (Settings.get('osmBasemap') === false) return 'basemap off';
+    const A = entry.A;
+    const manual = A && A.lapBounds && A.lapBounds[0] && A.lapBounds[0].source === 'manual';
+    const prefix = manual ? 'start/finish set by you · ' : '';
+    if (Settings.get('osmBasemap') === false) return prefix + 'basemap off';
     if (entry.osm) {
       const c = entry.osm.counts;
-      return c.roads + ' roads · ' + c.buildings + ' buildings from OpenStreetMap';
+      return prefix + c.roads + ' roads · ' + c.buildings + ' buildings from OpenStreetMap';
     }
-    if (entry.osmError) return 'no basemap: ' + entry.osmError;
-    return '';
+    if (entry.osmError) return prefix + 'no basemap: ' + entry.osmError;
+    return prefix;
   }
 
   function powerLegend() {

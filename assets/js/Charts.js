@@ -644,20 +644,61 @@ const Charts = (() => {
       g.restore();
     }
 
-    // Start/finish.
+    // Start/finish, drawn as a line across the road rather than a cross on it —
+    // it is a line on the ground, and showing it as one makes it obvious which
+    // way round the lap starts and whether it is in the right place.
     if (A.lapBounds && A.lapBounds[0] && A.lapBounds[0].source !== 'none') {
-      const [px, py] = pr(A.lapBounds[0].i0);
+      const i0 = A.lapBounds[0].i0;
+      const [px, py] = pr(i0);
+      const manual = A.lapBounds[0].source === 'manual';
+      const h = P.heading[i0];
+      const nx = Math.cos(h), ny = Math.sin(h);        // perpendicular to travel
+      const L = 13;
       g.save();
-      g.strokeStyle = INK.text;
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(px - 7, py - 7); g.lineTo(px + 7, py + 7);
-      g.moveTo(px + 7, py - 7); g.lineTo(px - 7, py + 7); g.stroke();
+      g.strokeStyle = manual ? '#fab219' : INK.text;
+      g.lineWidth = 3;
+      g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(px - nx * L, py - ny * L);
+      g.lineTo(px + nx * L, py + ny * L);
+      g.stroke();
+      g.fillStyle = manual ? '#fab219' : INK.text;
+      g.font = '600 9px system-ui, -apple-system, sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'bottom';
+      g.strokeStyle = INK.surface;
+      g.lineWidth = 3;
+      const label = manual ? 'START/FINISH' : 'lap split';
+      g.strokeText(label, px, py - L - 3);
+      g.fillText(label, px, py - L - 3);
       g.restore();
     }
 
     // Wind arrow, drawn in the corner pointing the way the wind blows.
     if (A.wind && A.wind.speed > 0.3) drawWindArrow(g, w, h, A.wind);
     if (opts.osm) drawAttribution(g, w, h, opts.osm.attribution || '© OpenStreetMap contributors');
+
+    // Click-to-place the start/finish line.
+    if (canvas._clPick) canvas.removeEventListener('click', canvas._clPick);
+    if (opts.onPick) {
+      canvas.style.cursor = 'crosshair';
+      canvas._clPick = ev => {
+        const r = canvas.getBoundingClientRect();
+        const px = ev.clientX - r.left, py = ev.clientY - r.top;
+        let best = -1, bestD = 40;
+        for (let i = 0; i < P.n; i++) {
+          if (!P.moving[i] || (!P.lat[i] && !P.lon[i])) continue;
+          const [ax, ay] = pr(i);
+          const d = Math.hypot(ax - px, ay - py);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        if (best >= 0) opts.onPick({ lat: P.lat[best], lon: P.lon[best], index: best });
+      };
+      canvas.addEventListener('click', canvas._clPick);
+    } else {
+      canvas._clPick = null;
+      canvas.style.cursor = '';
+    }
 
     onHover(canvas, (px, py) => {
       let best = -1, bestD = 18;
