@@ -478,8 +478,7 @@ const Analyzer = (() => {
       };
     });
 
-    turns.sort((a, b) => a.lapOffset - b.lapOffset);
-    turns.forEach((t, k) => { t.number = k + 1; t.name = 'Turn ' + (k + 1); });
+    numberFromStart(P, turns);
 
     // One instance per lap, located by lap fraction rather than by re-detecting.
     for (const t of turns) {
@@ -493,6 +492,51 @@ const Analyzer = (() => {
       }
     }
     return turns.filter(t => t.events.length >= 2);
+  }
+
+  /**
+   * Number the corners the way a rider counts them: Turn 1 is the first one you
+   * reach after rolling off the start, Turn 2 the next, and so on.
+   *
+   * The obvious ordering — by distance along the lap — is wrong here, because
+   * "along the lap" is measured from the lap-detection anchor, and that anchor
+   * is chosen for being a fast, straight, unambiguous piece of road somewhere
+   * in the first half of the ride. It is a good place to detect a lap crossing
+   * and an arbitrary place to start counting corners from.
+   *
+   * So the order comes from the track itself: for each corner, the first sample
+   * in the whole recording at which the rider passes through it.
+   */
+  function numberFromStart(P, turns) {
+    if (!turns.length) return turns;
+
+    if (P.lat) {
+      const mLat = 111320;
+      const mLon = 111320 * Math.cos((P.lat[0] || 0) * Math.PI / 180);
+      const near = 30;                                    // metres
+
+      for (const t of turns) {
+        t.firstSeen = Infinity;
+        for (let i = 0; i < P.n; i++) {
+          if (!P.moving[i]) continue;
+          if (!P.lat[i] && !P.lon[i]) continue;
+          const d = Math.hypot((P.lon[i] - t.lon) * mLon, (P.lat[i] - t.lat) * mLat);
+          if (d < near) { t.firstSeen = i; break; }
+        }
+      }
+      // Only trust it if every corner was actually located on the track.
+      if (turns.every(t => isFinite(t.firstSeen))) {
+        turns.sort((a, b) => a.firstSeen - b.firstSeen);
+        turns.forEach((t, k) => { t.number = k + 1; t.name = 'Turn ' + (k + 1); });
+        return turns;
+      }
+    }
+
+    // No GPS, or a corner that could not be found on the raw track: fall back
+    // to lap order, which at least keeps them in a consistent sequence.
+    turns.sort((a, b) => (a.lapOffset || 0) - (b.lapOffset || 0));
+    turns.forEach((t, k) => { t.number = k + 1; t.name = 'Turn ' + (k + 1); });
+    return turns;
   }
 
   function classifyTurn(deg) {
@@ -591,8 +635,7 @@ const Analyzer = (() => {
       c.lapOffset = lap && lapLen > 0 ? (P.dist[ev.apex] - P.dist[lap.i0]) / lapLen : P.dist[ev.apex];
       c.source = 'track';
     }
-    real.sort((a, b) => a.lapOffset - b.lapOffset);
-    real.forEach((c, k) => { c.number = k + 1; c.name = 'Turn ' + (k + 1); });
+    numberFromStart(P, real);
     return real;
   }
 
@@ -677,9 +720,13 @@ const Analyzer = (() => {
 
     let bounds, labels;
     if (turns.length >= 3) {
-      bounds = turns.map(t => clamp01(t.lapOffset));
-      bounds.sort((a, b) => a - b);
-      labels = bounds.map((_, k) => 'T' + (k + 1) + '→T' + ((k + 1) % bounds.length + 1));
+      // Sector *geometry* still comes from position around the lap — but the
+      // labels have to use each turn's real number, which is no longer the same
+      // as its position order now that numbering starts from the GPS start.
+      const ordered = turns.slice().sort((a, b) => a.lapOffset - b.lapOffset);
+      bounds = ordered.map(t => clamp01(t.lapOffset));
+      labels = ordered.map((t, k) =>
+        'T' + t.number + '→T' + ordered[(k + 1) % ordered.length].number);
     } else {
       const k = cfg.sectorCount || 8;
       bounds = Array.from({ length: k }, (_, j) => j / k);
@@ -1113,7 +1160,7 @@ const Analyzer = (() => {
   return {
     run, resolveWind, detectLaps, detectTurns, buildSectors, detectSurges,
     exposureByHeading, compareRow, angleDelta, R_EARTH,
-    buildMeanLap, fitCircle, classifyTurn,
+    buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };
 })();
 

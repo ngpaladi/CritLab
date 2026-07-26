@@ -395,6 +395,42 @@ if (A.turns.length) {
   check('all four corners turn the same way (a clockwise circuit)',
     new Set(A.turns.map(t => t.dir)).size === 1, A.turns.map(t => t.dir).join(', '));
 
+  // Numbering must follow the order the rider actually meets the corners from
+  // the start of the recording — not the order they fall after the lap-detection
+  // anchor, which sits on an arbitrary straight partway into the ride.
+  const seen = A.turns.map(t => t.firstSeen);
+  check('every corner was located on the raw track', seen.every(isFinite),
+    seen.join(', '));
+  check('corners are numbered in the order they are first ridden',
+    seen.every((v, i) => i === 0 || v >= seen[i - 1]),
+    'first reached at samples ' + seen.join(', '));
+  check('Turn 1 is the earliest corner in the recording',
+    seen[0] === Math.min(...seen), 'Turn 1 at sample ' + seen[0]);
+  check('numbering is independent of the lap anchor',
+    A.turns[0].firstSeen < A.lapBounds[0].i0 ||
+    A.lapBounds[0].i0 === 0,
+    'Turn 1 at ' + A.turns[0].firstSeen + ', lap anchor at ' + A.lapBounds[0].i0);
+
+  // Sector labels have to follow the real turn numbers now that numbering and
+  // position order can disagree.
+  if (A.sectors) {
+    const nums = A.turns.map(t => t.number).sort((a, b) => a - b);
+    check('turn numbers are 1..n with no gaps',
+      nums.every((v, i) => v === i + 1), nums.join(', '));
+    const labelled = A.sectors.labels.join(' ');
+    check('every sector label references real turn numbers',
+      A.sectors.labels.every(l => {
+        const m = l.match(/^T(\d+)→T(\d+)$/);
+        return m && nums.includes(Number(m[1])) && nums.includes(Number(m[2]));
+      }), labelled);
+    check('sector labels form a closed chain around the lap',
+      A.sectors.labels.every((l, k) => {
+        const to = l.match(/→T(\d+)$/)[1];
+        const nextFrom = A.sectors.labels[(k + 1) % A.sectors.labels.length].match(/^T(\d+)/)[1];
+        return to === nextFrom;
+      }), labelled);
+  }
+
   // The mean lap itself.
   const ML = A.meanLap;
   check('mean lap built', !!ML && ML.n > 300, ML ? ML.n + ' points at ' + ML.step + ' m' : 'null');
