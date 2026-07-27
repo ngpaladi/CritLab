@@ -217,14 +217,31 @@ title: About
   that have nothing to do with shelter.
 </p>
 
+<p>Two signals go into finding it, because neither works alone:</p>
+
+<ul>
+  <li><b>Circuit geometry</b> — was the rider on the circuit at all? This
+  separates the ride to the venue and the ride home from everything that
+  happened there. Pace cannot do it: a 30 km/h approach and a 30 km/h warm-up
+  lap look identical until you notice one of them is two miles away.</li>
+  <li><b>Lap pace</b> — among the laps actually on the circuit, which were
+  raced? Race laps are fast and remarkably consistent; warm-up and cool-down
+  laps are neither. Geometry cannot tell these apart, because they are all the
+  same road.</li>
+</ul>
+
 <p>
-  CritLab finds the race by lap pace: race laps on a circuit are fast and
-  remarkably consistent, warm-up and cool-down laps are neither, so the race is
-  the longest run of consecutive laps close to the quickest sustained pace of
-  the day. If it finds meaningful riding either side, it <em>offers</em> to trim
-  and you decide. The trim is applied before anything is derived, so every
-  number downstream is measured on the race alone, and it can be undone at any
-  time.
+  Boundaries land on lap crossings, so if you have placed a start/finish line
+  the race begins and ends exactly there rather than mid-lap.
+</p>
+
+<p>
+  Nothing is trimmed without asking. CritLab shows you the whole recording split
+  into phases, plus every lap with its pace against the race-pace reference and
+  the kept laps lit — the evidence the decision was made on, not just the
+  decision. You can add or drop a lap at either end before accepting, and undo
+  the whole thing later. The trim is applied before anything is derived, so
+  every number downstream is measured on the race alone.
 </p>
 
 <h2>Heart rate and cadence</h2>

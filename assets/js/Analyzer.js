@@ -327,46 +327,90 @@ const Analyzer = (() => {
   /**
    * Find where the race actually is inside the recording.
    *
-   * A crit file is usually three things end to end: a warm-up or neutral
-   * roll-out, the race, and a cool-down lap or two spinning with mates. All
-   * three look like riding, and lumping them together quietly corrupts almost
-   * every number here — W′ starts draining during the warm-up, the cool-down
-   * dilutes the exposure percentages, and a soft-pedalled lap drags the sector
-   * medians toward "sheltered" for reasons that have nothing to do with
-   * shelter.
+   * A crit file is rarely just a crit. Typically it is: ride or roll to the
+   * venue, some laps of the circuit warming up, the race, a cool-down lap or
+   * two, then spin back to the car. All of it looks like riding, and analysing
+   * it as one thing corrupts nearly everything — W′ drains before the start,
+   * the cool-down dilutes the exposure percentages, and a soft-pedalled lap
+   * drags the sector medians toward "sheltered" for reasons that have nothing
+   * to do with shelter.
    *
-   * The signal is lap pace. Race laps on a circuit are fast and remarkably
-   * consistent; warm-up and cool-down laps are neither. So the race is the
-   * longest run of consecutive laps whose pace sits close to the quickest
-   * sustained pace of the day.
+   * Two signals, because neither is enough alone:
    *
-   * @returns {{i0, i1, warmupSeconds, cooldownSeconds, raceLaps, totalLaps,
-   *            found, basis}}
+   *   Geometry — is the rider *on the circuit* at all? This separates the
+   *   approach and the ride home from everything that happened at the venue,
+   *   and pace cannot do it: a 30 km/h approach and a 30 km/h warm-up lap look
+   *   identical until you notice one of them is two miles away.
+   *
+   *   Pace — among the laps actually on the circuit, which were raced? Warm-up
+   *   and cool-down laps are slower and far more variable than race laps, and
+   *   geometry cannot tell them apart because they are all the same road.
+   *
+   * Boundaries land on lap crossings, so if a start/finish line has been placed
+   * the race begins and ends exactly there rather than mid-lap.
    */
   function detectRaceWindow(P, cfg) {
     const none = {
       i0: 0, i1: P.n - 1, warmupSeconds: 0, cooldownSeconds: 0,
+      approachSeconds: 0, homeSeconds: 0,
       raceLaps: 0, totalLaps: 0, found: false, basis: 'whole recording',
+      phases: [], lapInfo: [], anchoredToStartLine: false,
     };
 
     const laps = detectLaps(P, cfg);
     if (!laps.length || laps[0].source === 'none' || laps.length < 4) return none;
 
-    const speeds = laps.map(l => {
+    // ── Geometry: how far is each sample from the circuit? ──────────────────
+    const meanLap = buildMeanLap(P, laps);
+    const onCircuit = new Uint8Array(P.n);
+    if (meanLap) {
+      const mLat = 111320, mLon = 111320 * Math.cos(meanLap.lat[0] * Math.PI / 180);
+      // Sample the mean lap coarsely — 10 m resolution is ample for an
+      // on-or-off-the-circuit question and keeps this linear enough.
+      const stride = Math.max(1, Math.round(10 / meanLap.step));
+      const px = [], py = [];
+      for (let j = 0; j < meanLap.n; j += stride) { px.push(meanLap.x[j]); py.push(meanLap.y[j]); }
+      const lat0 = meanLap.lat[0], lon0 = meanLap.lon[0];
+      const near2 = (cfg.circuitCorridor || 45) ** 2;
+      for (let i = 0; i < P.n; i++) {
+        if (!P.lat[i] && !P.lon[i]) { onCircuit[i] = onCircuit[Math.max(0, i - 1)]; continue; }
+        const x = (P.lon[i] - lon0) * mLon, y = (P.lat[i] - lat0) * mLat;
+        let best = Infinity;
+        for (let k = 0; k < px.length; k++) {
+          const dx = x - px[k], dy = y - py[k];
+          const d2 = dx * dx + dy * dy;
+          if (d2 < best) { best = d2; if (best < near2) break; }
+        }
+        onCircuit[i] = best < near2 ? 1 : 0;
+      }
+    } else {
+      onCircuit.fill(1);
+    }
+
+    // ── Pace: which laps were raced? ────────────────────────────────────────
+    const lapInfo = laps.map((l, k) => {
       const secs = (l.i1 - l.i0) * P.dt;
-      return secs > 0 ? (P.dist[l.i1] - P.dist[l.i0]) / secs : 0;
+      const dist = P.dist[l.i1] - P.dist[l.i0];
+      let np = 0;
+      const w = [];
+      for (let i = l.i0; i <= l.i1; i++) if (P.moving[i]) w.push(P.watts[i]);
+      if (w.length) np = Physics.normalizedPower(w, P.dt);
+      return {
+        lap: k + 1, i0: l.i0, i1: l.i1,
+        seconds: secs,
+        speed: secs > 0 ? dist / secs : 0,
+        np,
+        inRace: false,
+      };
     });
 
-    // "Race pace" is the upper quartile of lap speeds, not the mean: a couple
-    // of slow cool-down laps must not drag the reference down with them.
-    const sorted = speeds.slice().sort((a, b) => a - b);
+    const sorted = lapInfo.map(l => l.speed).sort((a, b) => a - b);
     const racePace = sorted[Math.floor(sorted.length * 0.75)];
     if (!(racePace > 0)) return none;
 
-    const tol = cfg.raceLapTolerance || 0.88;          // within 12% of race pace
-    const ok = speeds.map(v => v >= racePace * tol);
+    const tol = cfg.raceLapTolerance || 0.88;
+    const ok = lapInfo.map(l => l.speed >= racePace * tol);
 
-    // Longest consecutive run of race-pace laps.
     let bestA = -1, bestB = -1, a = -1;
     for (let k = 0; k <= ok.length; k++) {
       if (k < ok.length && ok[k]) { if (a < 0) a = k; continue; }
@@ -376,28 +420,79 @@ const Analyzer = (() => {
       }
     }
     if (bestA < 0 || bestB - bestA + 1 < 3) return none;
+    for (let k = bestA; k <= bestB; k++) lapInfo[k].inRace = true;
 
     const i0 = laps[bestA].i0;
     const i1 = laps[bestB].i1;
 
-    // Only count time the rider was actually moving: an hour parked in the car
-    // park before the start is not a warm-up anybody wants reported.
-    let warm = 0, cool = 0;
-    for (let i = 0; i < i0; i++) if (P.moving[i]) warm += P.dt;
-    for (let i = i1 + 1; i < P.n; i++) if (P.moving[i]) cool += P.dt;
+    // ── Phases ──────────────────────────────────────────────────────────────
+    // Before the first lap crossing the rider is either approaching the venue
+    // (off the circuit) or already warming up on it; same story afterwards.
+    const movingSecs = (from, to, wantOn) => {
+      let sec = 0;
+      for (let i = Math.max(0, from); i <= Math.min(P.n - 1, to); i++) {
+        if (!P.moving[i]) continue;
+        if (wantOn == null || !!onCircuit[i] === wantOn) sec += P.dt;
+      }
+      return sec;
+    };
+
+    const approach = movingSecs(0, i0 - 1, false);
+    const warmup = movingSecs(0, i0 - 1, true);
+    const cooldown = movingSecs(i1 + 1, P.n - 1, true);
+    const home = movingSecs(i1 + 1, P.n - 1, false);
+
+    const phases = [];
+    const push = (kind, from, to, laps_) => {
+      const sec = movingSecs(from, to, null);
+      if (sec > 5) phases.push({ kind, i0: from, i1: to, seconds: sec, laps: laps_ });
+    };
+    // Split the lead-in at the point the rider first reaches the circuit.
+    let arrive = 0;
+    while (arrive < i0 && !onCircuit[arrive]) arrive++;
+    push('approach', 0, arrive - 1, 0);
+    push('warmup', arrive, i0 - 1, bestA);
+    push('race', i0, i1, bestB - bestA + 1);
+    let leave = P.n - 1;
+    while (leave > i1 && !onCircuit[leave]) leave--;
+    push('cooldown', i1 + 1, leave, lapInfo.length - 1 - bestB);
+    push('home', leave + 1, P.n - 1, 0);
 
     return {
       i0, i1,
-      warmupSeconds: warm,
-      cooldownSeconds: cool,
+      warmupSeconds: warmup,
+      cooldownSeconds: cooldown,
+      approachSeconds: approach,
+      homeSeconds: home,
       raceLaps: bestB - bestA + 1,
-      totalLaps: laps.length,
+      totalLaps: lapInfo.length,
+      firstRaceLap: bestA,
+      lastRaceLap: bestB,
+      lapInfo,
+      phases,
+      onCircuit,
+      racePace,
+      anchoredToStartLine: laps[0].source === 'manual',
       found: true,
-      basis: 'lap pace within ' + Math.round((1 - tol) * 100) + '% of race pace',
+      basis: (laps[0].source === 'manual'
+        ? 'your start/finish line, plus lap pace'
+        : 'circuit geometry and lap pace'),
     };
   }
 
-  // ── Turns ─────────────────────────────────────────────────────────────────
+  /** Move the race window by whole laps — what the nudge buttons drive. */
+  function adjustRaceWindow(win, deltaStart, deltaEnd) {
+    if (!win || !win.found) return win;
+    const a = Math.max(0, Math.min(win.lastRaceLap, win.firstRaceLap + deltaStart));
+    const b = Math.min(win.lapInfo.length - 1, Math.max(a, win.lastRaceLap + deltaEnd));
+    const out = { ...win, firstRaceLap: a, lastRaceLap: b,
+      i0: win.lapInfo[a].i0, i1: win.lapInfo[b].i1,
+      raceLaps: b - a + 1 };
+    out.lapInfo = win.lapInfo.map((l, k) => ({ ...l, inRace: k >= a && k <= b }));
+    return out;
+  }
+
+  // ── Turns ─────────────────────────────────────────────────────────────────  // ── Turns ─────────────────────────────────────────────────────────────────
 
   /**
    * Corner detection.
@@ -1550,7 +1645,7 @@ const Analyzer = (() => {
 
   return {
     run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, nearestTrackIndex, detectTurns, buildSectors, detectSurges,
-    exposureByHeading, elevationClosure, detectRaceWindow, summariseHr, raceShape, circuitFingerprint, sameCircuit, groupByCircuit, compareRow, angleDelta, R_EARTH,
+    exposureByHeading, elevationClosure, detectRaceWindow, adjustRaceWindow, summariseHr, raceShape, circuitFingerprint, sameCircuit, groupByCircuit, compareRow, angleDelta, R_EARTH,
     buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };
 })();

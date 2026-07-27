@@ -1454,6 +1454,107 @@ const Charts = (() => {
     return { frac, state, rate, colour, label: stateLabel };
   }
 
+  // ── Crop timeline ─────────────────────────────────────────────────────────
+
+  const PHASE = {
+    approach: { color: '#2b323c', label: 'ride in' },
+    warmup:   { color: '#3d4a5c', label: 'warm-up' },
+    race:     { color: '#d95926', label: 'race' },
+    cooldown: { color: '#3d4a5c', label: 'cool-down' },
+    home:     { color: '#2b323c', label: 'ride home' },
+  };
+
+  /**
+   * What the trim decided, laid out end to end.
+   *
+   * Two rows. The top is the whole recording split into phases, so you can see
+   * at a glance how much of the file is not the race. The bottom is one block
+   * per lap, height by pace, with the raced laps lit — which is the evidence
+   * the decision was actually made on, rather than an assertion that it was
+   * made well.
+   */
+  function cropTimeline(canvas, P, win, opts = {}) {
+    const { g, w, h } = setup(canvas, opts.height || 118);
+    if (!win || !win.found) { emptyState(g, w, h, 'No lap structure to trim against'); return; }
+
+    const pad = 8;
+    const barY = 18, barH = 26;
+    const total = P.t[P.n - 1] || 1;
+    const X = t => pad + (t / total) * (w - pad * 2);
+
+    // ── phases ──
+    g.save();
+    g.font = '10px system-ui, -apple-system, sans-serif';
+    g.textBaseline = 'middle';
+    for (const ph of win.phases) {
+      const style = PHASE[ph.kind] || PHASE.warmup;
+      const x0 = X(P.t[ph.i0]), x1 = X(P.t[Math.min(P.n - 1, ph.i1)]);
+      const bw = Math.max(2, x1 - x0);
+      g.fillStyle = style.color;
+      roundRect(g, x0, barY, bw, barH, 3);
+      g.fill();
+      if (bw > 46) {
+        g.fillStyle = ph.kind === 'race' ? '#fff' : INK.muted;
+        g.textAlign = 'center';
+        g.fillText(style.label, x0 + bw / 2, barY + barH / 2 - 5);
+        g.fillText(fmtClock(ph.seconds), x0 + bw / 2, barY + barH / 2 + 6);
+      }
+    }
+    g.restore();
+
+    // ── per-lap pace ──
+    const rowY = barY + barH + 12, rowH = h - rowY - 16;
+    if (rowH > 10 && win.lapInfo.length) {
+      const speeds = win.lapInfo.map(l => l.speed);
+      const vMax = Math.max(...speeds) * 1.05;
+      const vMin = Math.min(...speeds) * 0.85;
+      const span = Math.max(0.1, vMax - vMin);
+      for (const l of win.lapInfo) {
+        const x0 = X(P.t[l.i0]), x1 = X(P.t[Math.min(P.n - 1, l.i1)]);
+        const bw = Math.max(2, x1 - x0 - 1);
+        const frac = (l.speed - vMin) / span;
+        const bh = Math.max(3, frac * rowH);
+        g.fillStyle = l.inRace ? SERIES.watts.color : '#333b47';
+        roundRect(g, x0, rowY + rowH - bh, bw, bh, 2);
+        g.fill();
+      }
+      // Race-pace reference.
+      const y = rowY + rowH - ((win.racePace - vMin) / span) * rowH;
+      g.save();
+      g.strokeStyle = INK.axis;
+      g.setLineDash([3, 3]);
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(pad, y); g.lineTo(w - pad, y); g.stroke();
+      g.restore();
+      label(g, 'race pace ' + (win.racePace * 3.6).toFixed(0) + ' km/h', w - pad, y - 6, INK.muted, 'right');
+    }
+
+    g.save();
+    g.fillStyle = INK.muted;
+    g.font = '10px system-ui, -apple-system, sans-serif';
+    g.textAlign = 'left'; g.textBaseline = 'top';
+    g.fillText('lap pace — lit laps are the ones being kept', pad, h - 12);
+    g.restore();
+
+    onHover(canvas, (px, py) => {
+      const t = ((px - pad) / (w - pad * 2)) * total;
+      const l = win.lapInfo.find(x => P.t[x.i0] <= t && t <= P.t[Math.min(P.n - 1, x.i1)]);
+      if (!l) {
+        const ph = win.phases.find(x => P.t[x.i0] <= t && t <= P.t[Math.min(P.n - 1, x.i1)]);
+        if (!ph) return null;
+        return ttRows((PHASE[ph.kind] || {}).label || ph.kind,
+          [{ name: 'Duration', value: fmtClock(ph.seconds) }]);
+      }
+      return ttRows('Lap ' + l.lap + (l.inRace ? ' · kept' : ' · trimmed'), [
+        { color: l.inRace ? SERIES.watts.color : '#333b47', name: 'Average speed',
+          value: (l.speed * 3.6).toFixed(1) + ' km/h' },
+        { name: 'Lap time', value: fmtClock(l.seconds) },
+        { name: 'Normalised power', value: Math.round(l.np) + ' W' },
+        { name: 'vs race pace', value: ((l.speed / win.racePace - 1) * 100).toFixed(0) + '%' },
+      ]);
+    });
+  }
+
   // ── Shared bits ───────────────────────────────────────────────────────────
 
   function roundRect(g, x, y, w, h, r, endOnly = false) {
@@ -1521,7 +1622,7 @@ const Charts = (() => {
     setup, box, scale, ticks, line, label, onHover, ttRows, projector,
     timeline, ratioStrip, circuitMap, sectorHeatmap, wbalChart,
     turnBars, exposureRose, lapBars, compareBars, replayFrame,
-    wbalBattery, drawBasemap, drawAttribution, BASEMAP,
+    wbalBattery, cropTimeline, PHASE, drawBasemap, drawAttribution, BASEMAP,
     fmtClock, fmt2, fmtPct, esc, shorten,
   };
 })();

@@ -191,17 +191,8 @@
     try {
       const cfg = RideStore.configFor(entry.P, {});
       const w = Analyzer.detectRaceWindow(entry.P, cfg);
-      // Only worth mentioning if there is a real amount to remove.
-      if (w.found && (w.warmupSeconds > 60 || w.cooldownSeconds > 60)) {
-        entry.cropSuggestion = {
-          startT: entry.P.t[w.i0],
-          endT: entry.P.t[w.i1],
-          warmupSeconds: w.warmupSeconds,
-          cooldownSeconds: w.cooldownSeconds,
-          raceLaps: w.raceLaps,
-          totalLaps: w.totalLaps,
-        };
-      }
+      const spare = w.warmupSeconds + w.cooldownSeconds + w.approachSeconds + w.homeSeconds;
+      if (w.found && spare > 60) entry.cropWindow = w;
     } catch (_) { /* cropping is a convenience, never a blocker */ }
   }
 
@@ -216,44 +207,69 @@
       el.innerHTML =
         '<div class="crop-prompt crop-active">' +
         '<div class="crop-prompt-title">Trimmed to the race</div>' +
-        '<p>Analysing ' + Charts.fmtClock(c.endT - c.startT) + ' of racing. ' +
-        'Everything here — laps, W′, exposure — is measured on that window alone.</p>' +
+        '<p>Analysing ' + Charts.fmtClock(c.endT - c.startT) + ' of racing. Laps, W′, ' +
+        'exposure and the sector medians are all measured on that window alone.</p>' +
         '<div class="btn-row"><button class="btn btn-sm" id="crop-undo">Use the whole recording</button></div>' +
         '</div>';
       $('crop-undo').addEventListener('click', () => applyCrop(entry, null));
       return;
     }
 
-    const sug = entry.cropSuggestion;
-    if (!sug) { el.innerHTML = ''; return; }
+    const win = entry.cropWindow;
+    if (!win) { el.innerHTML = ''; return; }
 
-    const bits = [];
-    if (sug.warmupSeconds > 60) bits.push(Charts.fmtClock(sug.warmupSeconds) + ' before the race');
-    if (sug.cooldownSeconds > 60) bits.push(Charts.fmtClock(sug.cooldownSeconds) + ' after it');
+    const parts = [];
+    if (win.approachSeconds > 30) parts.push(Charts.fmtClock(win.approachSeconds) + ' riding in');
+    if (win.warmupSeconds > 30) parts.push(Charts.fmtClock(win.warmupSeconds) + ' warming up on the circuit');
+    if (win.cooldownSeconds > 30) parts.push(Charts.fmtClock(win.cooldownSeconds) + ' cooling down on it');
+    if (win.homeSeconds > 30) parts.push(Charts.fmtClock(win.homeSeconds) + ' riding home');
 
     el.innerHTML =
       '<div class="crop-prompt">' +
-      '<div class="crop-prompt-title">This file has riding either side of the race</div>' +
-      '<p>Found ' + sug.raceLaps + ' laps at race pace, with ' + bits.join(' and ') +
-      '. Warm-up and cool-down laps drain W′ before the start and dilute the exposure ' +
-      'percentages afterwards, so trimming usually makes the numbers mean what you think ' +
-      'they mean.</p>' +
-      '<div class="btn-row">' +
-      '<button class="btn btn-primary btn-sm" id="crop-yes">Trim to the race</button>' +
+      '<div class="crop-prompt-title">This file contains more than the race</div>' +
+      '<p>' + win.raceLaps + ' of ' + win.totalLaps + ' laps were ridden at race pace' +
+      (parts.length ? ', with ' + parts.join(', ') : '') + '. Found from ' +
+      Charts.esc(win.basis) + '.</p>' +
+      '<div class="chart-wrap"><canvas class="chart" id="crop-chart"></canvas></div>' +
+      '<div class="crop-nudge">' +
+      '<span class="crop-nudge-label">Race laps</span>' +
+      '<button class="btn btn-sm" data-nudge="start:-1" title="Include the lap before">＋ at the start</button>' +
+      '<button class="btn btn-sm" data-nudge="start:1" title="Drop the first race lap">− at the start</button>' +
+      '<span class="crop-nudge-count" id="crop-count">' + win.raceLaps + ' laps · ' +
+      Charts.fmtClock(entry.P.t[win.i1] - entry.P.t[win.i0]) + '</span>' +
+      '<button class="btn btn-sm" data-nudge="end:-1" title="Drop the last race lap">− at the end</button>' +
+      '<button class="btn btn-sm" data-nudge="end:1" title="Include the lap after">＋ at the end</button>' +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:10px">' +
+      '<button class="btn btn-primary btn-sm" id="crop-yes">Trim to these laps</button>' +
       '<button class="btn btn-sm" id="crop-no">Keep everything</button>' +
       '</div></div>';
 
-    $('crop-yes').addEventListener('click', () =>
-      applyCrop(entry, { startT: sug.startT, endT: sug.endT }));
+    Charts.cropTimeline($('crop-chart'), entry.P, win, { height: 118 });
+
+    el.querySelectorAll('[data-nudge]').forEach(b => {
+      b.addEventListener('click', () => {
+        const [which, dir] = b.dataset.nudge.split(':');
+        const d = Number(dir);
+        entry.cropWindow = Analyzer.adjustRaceWindow(
+          entry.cropWindow, which === 'start' ? d : 0, which === 'end' ? d : 0);
+        renderCropPrompt();
+      });
+    });
+
+    $('crop-yes').addEventListener('click', () => {
+      const w = entry.cropWindow;
+      applyCrop(entry, { startT: entry.P.t[w.i0], endT: entry.P.t[w.i1] });
+    });
     $('crop-no').addEventListener('click', () => {
-      entry.cropSuggestion = null;
+      entry.cropWindow = null;
       renderCropPrompt();
     });
   }
 
   async function applyCrop(entry, crop) {
     entry.raw.crop = crop;
-    entry.cropSuggestion = null;
+    entry.cropWindow = null;
     entry.cropChecked = !!crop;
     try {
       entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });

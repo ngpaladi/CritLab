@@ -992,6 +992,42 @@ section('Race window and cropping');
   const silly = { ...padded, crop: { startT: 10, endT: 12 } };
   const Ps = RideStore.prepare(silly, { movingSpeed: 2.5 });
   check('an impossibly short crop is refused', Ps.n > 100, Ps.n + ' samples');
+
+  // Phases, and the per-lap evidence behind them.
+  check('phases are reported in order',
+    w.phases.length >= 2 &&
+    w.phases.every((ph, k) => k === 0 || ph.i0 >= w.phases[k - 1].i0),
+    w.phases.map(ph => ph.kind).join(' → '));
+  check('exactly one phase is the race',
+    w.phases.filter(ph => ph.kind === 'race').length === 1);
+  check('the race phase matches the window',
+    w.phases.find(ph => ph.kind === 'race').i0 === w.i0);
+  check('every lap is classified', w.lapInfo.length === w.totalLaps &&
+    w.lapInfo.filter(l => l.inRace).length === w.raceLaps,
+    w.lapInfo.filter(l => l.inRace).length + ' of ' + w.lapInfo.length + ' kept');
+  check('kept laps are faster than trimmed ones',
+    Physics.mean(w.lapInfo.filter(l => l.inRace).map(l => l.speed)) >
+    Physics.mean(w.lapInfo.filter(l => !l.inRace).map(l => l.speed)),
+    (Physics.mean(w.lapInfo.filter(l => l.inRace).map(l => l.speed)) * 3.6).toFixed(1) +
+    ' vs ' + (Physics.mean(w.lapInfo.filter(l => !l.inRace).map(l => l.speed)) * 3.6).toFixed(1) + ' km/h');
+
+  // Nudging moves whole laps and never inverts the window.
+  const narrower = Analyzer.adjustRaceWindow(w, 1, -1);
+  check('nudging in drops a lap at each end', narrower.raceLaps === w.raceLaps - 2,
+    narrower.raceLaps + ' from ' + w.raceLaps);
+  check('nudged boundaries land on lap edges',
+    w.lapInfo.some(l => l.i0 === narrower.i0) && w.lapInfo.some(l => l.i1 === narrower.i1));
+  const silly2 = Analyzer.adjustRaceWindow(w, 999, -999);
+  check('nudging past the ends cannot invert the window',
+    silly2.i0 <= silly2.i1 && silly2.raceLaps >= 1, silly2.raceLaps + ' laps');
+  const wider = Analyzer.adjustRaceWindow(w, -99, 99);
+  check('nudging out is bounded by the laps that exist',
+    wider.raceLaps <= w.totalLaps, wider.raceLaps + ' of ' + w.totalLaps);
+
+  // Geometry: a ride that approaches from off-circuit must be split into an
+  // approach phase and a warm-up phase, which pace alone cannot distinguish.
+  check('the start/finish anchoring is reported',
+    typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
 }
 
 section('Heart rate, cadence and race shape');

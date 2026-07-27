@@ -177,11 +177,33 @@ async function settle(ms = 250) {
   {
     const cp = $('crop-prompt');
     check('crop prompt slot exists', !!cp);
-    const offered = /Trim to the race/.test(cp.textContent);
+    const offered = !!$('crop-yes');
     check('crop prompt is either a valid offer or absent',
       !cp.textContent.trim() || offered || /Trimmed to the race/.test(cp.textContent),
       cp.textContent.replace(/\s+/g, ' ').slice(0, 70) || '(none)');
     if (offered) {
+      check('the crop detail names how many laps were raced',
+        /\d+ of \d+ laps were ridden at race pace/.test(cp.textContent),
+        (cp.textContent.match(/\d+ of \d+ laps[^.]*/) || ['?'])[0].slice(0, 60));
+      check('the crop detail says what it decided from',
+        /Found from/.test(cp.textContent));
+      check('the crop timeline drew', drew($('crop-chart')), calls($('crop-chart')));
+
+      // Nudge controls must move the window a whole lap at a time.
+      const readCount = () => {
+        const m = $('crop-count').textContent.match(/^(\d+) laps/);
+        return m ? Number(m[1]) : null;
+      };
+      const laps0 = readCount();
+      cp.querySelector('[data-nudge="end:-1"]').dispatchEvent(new window.Event('click'));
+      await settle(150);
+      check('dropping a lap at the end narrows the window', readCount() === laps0 - 1,
+        laps0 + ' → ' + readCount());
+      cp.querySelector('[data-nudge="end:1"]').dispatchEvent(new window.Event('click'));
+      await settle(150);
+      check('adding it back restores the window', readCount() === laps0,
+        laps0 + ' → ' + readCount());
+
       const before = window.CritLab.state.races[0].P.n;
       $('crop-yes').dispatchEvent(new window.Event('click'));
       await settle(900);

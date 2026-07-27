@@ -758,3 +758,26 @@ table.data td.dim { color: var(--text-muted); }
   border-color: var(--accent);
 }
 .crop-active .crop-prompt-title { color: var(--accent); }
+
+.crop-nudge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.crop-nudge-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.crop-nudge-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  padding: 0 6px;
+  min-width: 116px;
+  text-align: center;
+}
