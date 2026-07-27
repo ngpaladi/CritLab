@@ -29,6 +29,7 @@ const Settings = (() => {
 
     // recording habits — things only the rider knows
     startsOnStartLine: false,
+    autoTrimCooldown: false,
 
     // rider + machine
     mass: 78, crr: 0.004, cda: 0.32, lockCda: false,

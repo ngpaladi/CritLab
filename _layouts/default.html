@@ -130,8 +130,17 @@
             <span>I start recording on the start/finish line</span>
           </label>
           <p class="hint" style="margin-top:6px">
-            When this is on, nothing is ever trimmed from the front of a race and the
-            start/finish line is taken to be where the recording begins.
+            Nothing is ever trimmed from the front of a race, and the start/finish
+            line is taken to be where the recording begins.
+          </p>
+
+          <label class="check" style="margin-top:12px">
+            <input type="checkbox" id="auto-trim-cooldown">
+            <span>Drop cool-down laps automatically</span>
+          </label>
+          <p class="hint" style="margin-top:6px">
+            Trims the laps after the racing without asking each time. Any race can
+            still be put back to the full recording afterwards.
           </p>
         </div>
 
@@ -188,6 +197,7 @@
       roughEl.value  = String(s.wxRoughness || 0.1);
       document.getElementById('osm-enabled').checked = s.osmBasemap !== false;
       document.getElementById('starts-on-line').checked = !!s.startsOnStartLine;
+      document.getElementById('auto-trim-cooldown').checked = !!s.autoTrimCooldown;
       statusEl.style.display = 'none';
       modal.style.display = '';
       keyEl.focus();
@@ -243,6 +253,11 @@
 
     document.getElementById('starts-on-line').addEventListener('change', function () {
       Settings.set({ startsOnStartLine: this.checked });
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { recording: true } }));
+    });
+
+    document.getElementById('auto-trim-cooldown').addEventListener('change', function () {
+      Settings.set({ autoTrimCooldown: this.checked });
       window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { recording: true } }));
     });
 

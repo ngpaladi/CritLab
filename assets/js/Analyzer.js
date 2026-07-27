@@ -438,6 +438,15 @@ const Analyzer = (() => {
     }
     if (bestA < 0 || bestB - bestA + 1 < 3) return none;
 
+    // A first lap from a standing start is legitimately slower than the laps
+    // that follow — the field is rolling out, not racing yet, but it is still
+    // the race. On an already-trimmed file that lap is the *only* thing at the
+    // front, and trimming it would silently delete the start. So leading laps
+    // are held to a much looser bar than the rest: obviously slow, not merely
+    // slower.
+    const frontTol = cfg.rollOutTolerance || 0.78;
+    while (bestA > 0 && lapInfo[bestA - 1].speed >= racePace * frontTol) bestA--;
+
     // "I always start recording on the start line" — a fact about how you ride
     // that no amount of signal processing can discover, and which removes the
     // whole warm-up-detection guess when it is true.
@@ -502,6 +511,9 @@ const Analyzer = (() => {
       homeSeconds: home,
       raceLaps: bestB - bestA + 1,
       totalLaps: lapInfo.length,
+      // Nothing worth removing at either end: the file is already just the race.
+      preCropped: (bestB - bestA + 1) === lapInfo.length &&
+        approach + warmup + cooldown + home < 60,
       firstRaceLap: bestA,
       lastRaceLap: bestB,
       lapInfo,

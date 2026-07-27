@@ -191,9 +191,49 @@
     try {
       const cfg = RideStore.configFor(entry.P, {});
       const w = Analyzer.detectRaceWindow(entry.P, cfg);
+      if (!w.found) return;
+      entry.raceWindow = w;
+
+      // Plenty of files arrive already trimmed — cut in intervals.icu, or
+      // simply started and stopped at the line. Say so once rather than either
+      // nagging about a trim that would remove nothing or staying silent and
+      // leaving it unclear whether anything was checked.
       const spare = w.warmupSeconds + w.cooldownSeconds + w.approachSeconds + w.homeSeconds;
-      if (w.found && spare > 60) entry.cropWindow = w;
+      if (w.preCropped || spare <= 60) { entry.alreadyTrimmed = true; return; }
+
+      // Dropping the cool-down without asking, when that has been asked for.
+      // Only ever the tail: trimming the front unprompted could silently remove
+      // a neutral lap that was part of the race, and that is not a decision to
+      // make on someone's behalf.
+      const tail = w.cooldownSeconds + w.homeSeconds;
+      if (Settings.get('autoTrimCooldown') && tail > 60) {
+        entry.raw.crop = { startT: entry.P.t[w.i0], endT: entry.P.t[w.i1] };
+        entry.autoTrimmed = { seconds: tail, laps: w.totalLaps - w.lastRaceLap - 1 };
+        try {
+          entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
+        } catch (_) {
+          entry.raw.crop = null;
+          entry.autoTrimmed = null;
+          entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
+          entry.cropWindow = w;
+          return;
+        }
+        RideStore.put(entry.raw).catch(() => {});
+        return;
+      }
+
+      entry.cropWindow = w;
     } catch (_) { /* cropping is a convenience, never a blocker */ }
+  }
+
+  /** Re-detect, but always offer the prompt rather than acting on it. */
+  function detectCropInteractive(entry) {
+    entry.cropChecked = true;
+    try {
+      const cfg = RideStore.configFor(entry.P, {});
+      const w = Analyzer.detectRaceWindow(entry.P, cfg);
+      if (w.found) entry.cropWindow = w;
+    } catch (_) {}
   }
 
   function renderCropPrompt() {
@@ -204,19 +244,48 @@
 
     if (entry.raw.crop) {
       const c = entry.raw.crop;
+      const auto = entry.autoTrimmed;
       el.innerHTML =
         '<div class="crop-prompt crop-active">' +
-        '<div class="crop-prompt-title">Trimmed to the race</div>' +
-        '<p>Analysing ' + Charts.fmtClock(c.endT - c.startT) + ' of racing. Laps, W′, ' +
-        'exposure and the sector medians are all measured on that window alone.</p>' +
-        '<div class="btn-row"><button class="btn btn-sm" id="crop-undo">Use the whole recording</button></div>' +
-        '</div>';
+        '<div class="crop-prompt-title">' +
+        (auto ? 'Cool-down dropped automatically' : 'Trimmed to the race') + '</div>' +
+        '<p>Analysing ' + Charts.fmtClock(c.endT - c.startT) + ' of racing' +
+        (auto ? ', with ' + Charts.fmtClock(auto.seconds) + ' of cooling down removed' +
+          (auto.laps > 0 ? ' (' + auto.laps + ' lap' + (auto.laps === 1 ? '' : 's') + ')' : '')
+          : '') +
+        '. Laps, W′, exposure and the sector medians are all measured on that ' +
+        'window alone.</p>' +
+        '<div class="btn-row">' +
+        '<button class="btn btn-sm" id="crop-undo">Use the whole recording</button>' +
+        (auto ? '<button class="btn btn-sm" id="crop-review">Review the trim</button>' : '') +
+        '</div></div>';
       $('crop-undo').addEventListener('click', () => applyCrop(entry, null));
+      const review = $('crop-review');
+      if (review) {
+        review.addEventListener('click', async () => {
+          // Put it back, then offer the full interactive prompt instead.
+          entry.autoTrimmed = null;
+          entry.cropChecked = false;
+          await applyCrop(entry, null);
+          detectCropInteractive(entry);
+          renderAll();
+        });
+      }
       return;
     }
 
     const win = entry.cropWindow;
-    if (!win) { el.innerHTML = ''; return; }
+    if (!win) {
+      if (entry.alreadyTrimmed && entry.raceWindow) {
+        const w = entry.raceWindow;
+        el.innerHTML = '<p class="hint" style="margin-bottom:12px">' +
+          'This file is already just the race — ' + w.raceLaps +
+          ' laps, nothing worth trimming at either end.</p>';
+      } else {
+        el.innerHTML = '';
+      }
+      return;
+    }
 
     const parts = [];
     if (win.approachSeconds > 30) parts.push(Charts.fmtClock(win.approachSeconds) + ' riding in');
@@ -270,6 +339,7 @@
   async function applyCrop(entry, crop) {
     entry.raw.crop = crop;
     entry.cropWindow = null;
+    if (!crop) entry.autoTrimmed = null;
     entry.cropChecked = !!crop;
     try {
       entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
@@ -401,7 +471,16 @@
       if (e.detail && e.detail.recording) {
         // How the rider records changes where the race is judged to start, so
         // every crop decision has to be made again.
-        for (const r of state.races) { r.cropChecked = false; r.cropWindow = null; }
+        for (const r of state.races) {
+          r.cropChecked = false; r.cropWindow = null;
+          // An automatic trim must be reconsidered, not left in place.
+          if (r.autoTrimmed) {
+            r.raw.crop = null; r.autoTrimmed = null;
+            try { r.P = RideStore.prepare(r.raw, { movingSpeed: 2.5 }); } catch (_) {}
+            RideStore.put(r.raw).catch(() => {});
+          }
+        }
+        for (const r of state.races) if (r.P) detectCrop(r);
         const entry = current();
         if (entry) detectCrop(entry);
         renderAll();

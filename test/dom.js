@@ -177,10 +177,45 @@ async function settle(ms = 250) {
   {
     const cp = $('crop-prompt');
     check('crop prompt slot exists', !!cp);
-    const offered = !!$('crop-yes');
-    check('crop prompt is either a valid offer or absent',
-      !cp.textContent.trim() || offered || /Trimmed to the race/.test(cp.textContent),
+    check('a clean recording is reported as already just the race',
+      /already just the race/.test(cp.textContent) || !cp.textContent.trim(),
       cp.textContent.replace(/\s+/g, ' ').slice(0, 70) || '(none)');
+  }
+
+  // Now the interactive path, on a ride that genuinely has a cool-down. Built
+  // here rather than shipped in the sample race, so the demo stays a clean
+  // recording and this still covers the trimming UI.
+  {
+    const Demo = G('Demo');
+    const base = Demo.build();
+    const lastT = base.t[base.t.length - 1];
+    const lastD = base.dist[base.dist.length - 1];
+    const n = base.lat.length;
+    const cool = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+    for (let k = 0; k < 600; k++) {           // 10 min of soft-pedalled laps
+      cool.t.push(lastT + 1 + k);
+      cool.lat.push(base.lat[k % n]);
+      cool.lon.push(base.lon[k % n]);
+      cool.alt.push(base.alt[k % n]);
+      cool.v.push(6);
+      cool.watts.push(85);
+      cool.dist.push(lastD + (k + 1) * 6);
+    }
+    const withCool = {
+      ...base, id: 'demo-with-cooldown', name: 'Sample crit + cool-down',
+      t: base.t.concat(cool.t), lat: base.lat.concat(cool.lat),
+      lon: base.lon.concat(cool.lon), alt: base.alt.concat(cool.alt),
+      v: base.v.concat(cool.v), watts: base.watts.concat(cool.watts),
+      dist: base.dist.concat(cool.dist),
+    };
+    withCool.n = withCool.t.length;
+
+    await window.CritLab.loadRaw(withCool, { persist: false });
+    await settle(700);
+    const cp = $('crop-prompt');
+    const offered = !!$('crop-yes');
+    check('a ride with a cool-down is offered a trim', offered,
+      cp.textContent.replace(/\s+/g, ' ').slice(0, 70));
     if (offered) {
       check('the crop detail names how many laps were raced',
         /\d+ of \d+ laps were ridden at race pace/.test(cp.textContent),
@@ -204,18 +239,41 @@ async function settle(ms = 250) {
       check('adding it back restores the window', readCount() === laps0,
         laps0 + ' → ' + readCount());
 
-      const before = window.CritLab.state.races[0].P.n;
+      // Reference the ride by id: races are sorted by date, and this one shares
+      // the sample race's (absent) start time, so index 0 is not reliable.
+      const cur = () => window.CritLab.state.races.find(r => r.id === 'demo-with-cooldown');
+      const before = cur().P.n;
       $('crop-yes').dispatchEvent(new window.Event('click'));
       await settle(900);
-      check('accepting the trim shortens the ride',
-        window.CritLab.state.races[0].P.n < before,
-        window.CritLab.state.races[0].P.n + ' from ' + before);
+      check('accepting the trim shortens the ride', cur().P.n < before,
+        cur().P.n + ' from ' + before);
       check('and offers to undo it', !!$('crop-undo'));
       $('crop-undo').dispatchEvent(new window.Event('click'));
       await settle(900);
-      check('undo restores the whole recording',
-        window.CritLab.state.races[0].P.n === before,
-        window.CritLab.state.races[0].P.n + ' vs ' + before);
+      check('undo restores the whole recording', cur().P.n === before,
+        cur().P.n + ' vs ' + before);
+    }
+
+    // Automatic cool-down removal, which must act without a prompt and still
+    // be reversible.
+    G('Settings').set({ autoTrimCooldown: true });
+    window.dispatchEvent(new window.CustomEvent('critlab:settings', { detail: { recording: true } }));
+    await settle(900);
+    check('turning on automatic trimming drops the cool-down without asking',
+      /dropped automatically/i.test($('crop-prompt').textContent),
+      $('crop-prompt').textContent.replace(/\s+/g, ' ').slice(0, 70));
+    check('and still offers a way back', !!$('crop-undo'));
+    check('and a way to review what it did', !!$('crop-review'));
+    G('Settings').set({ autoTrimCooldown: false });
+    window.dispatchEvent(new window.CustomEvent('critlab:settings', { detail: { recording: true } }));
+    await settle(900);
+
+    // Clean up so later checks see the original single sample race.
+    const extra = window.CritLab.state.races.find(r => r.id === 'demo-with-cooldown');
+    if (extra) {
+      window.CritLab.state.races = window.CritLab.state.races.filter(r => r !== extra);
+      await window.CritLab.select(window.CritLab.state.races[0].id);
+      await settle(400);
     }
   }
 
