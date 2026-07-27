@@ -1024,10 +1024,53 @@ section('Race window and cropping');
   check('nudging out is bounded by the laps that exist',
     wider.raceLaps <= w.totalLaps, wider.raceLaps + ' of ' + w.totalLaps);
 
-  // Geometry: a ride that approaches from off-circuit must be split into an
-  // approach phase and a warm-up phase, which pace alone cannot distinguish.
-  check('the start/finish anchoring is reported',
+  check('the basis for the decision is reported',
     typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
+
+  // "I start recording on the start line" is a fact about the rider, not the
+  // file. When declared, nothing may be trimmed off the front.
+  {
+    const cfgLine = RideStore.configFor(Pp, {});
+    cfgLine.startsOnStartLine = true;
+    const wl = Analyzer.detectRaceWindow(Pp, cfgLine);
+    check('declaring a start-line start keeps the first lap',
+      wl.found && wl.firstRaceLap === 0 && wl.warmupSeconds === 0,
+      'first race lap ' + wl.firstRaceLap + ', warm-up ' + wl.warmupSeconds + ' s');
+    check('and says so in the basis', /start on the line/.test(wl.basis), wl.basis);
+    check('and nothing at all is trimmed from the front',
+      wl.i0 === 0 && wl.approachSeconds === 0,
+      'window starts at sample ' + wl.i0);
+    check('the end is still judged on its own merits',
+      wl.lastRaceLap <= wl.lapInfo.length - 1 && wl.lastRaceLap >= wl.firstRaceLap,
+      'last race lap ' + wl.lastRaceLap + ' of ' + (wl.lapInfo.length - 1));
+  }
+
+  // A sustained stop after the racing is an unambiguous end. Riders who roll
+  // straight into a cool-down give us none, so this must find nothing there
+  // rather than misfiring.
+  check('a recording with no stops reports none', w.stops === 0 && !w.endedAtStop,
+    w.stops + ' stops');
+  {
+    const stopped = JSON.parse(JSON.stringify(padded));
+    // Halt for 60 s partway through what pace alone would call the race.
+    const at = Math.floor(stopped.t.length * 0.62);
+    for (let k = at; k < at + 60; k++) {
+      stopped.v[k] = 0; stopped.watts[k] = 0;
+      stopped.dist[k] = stopped.dist[at];
+      stopped.lat[k] = stopped.lat[at]; stopped.lon[k] = stopped.lon[at];
+    }
+    for (let k = at + 60; k < stopped.dist.length; k++) {
+      stopped.dist[k] -= (stopped.dist[at + 60] - stopped.dist[at]);
+    }
+    const Pst = RideStore.prepare(stopped, { movingSpeed: 2.5 });
+    const wst = Analyzer.detectRaceWindow(Pst, RideStore.configFor(Pst, {}));
+    check('a sustained stop is detected', wst.stops >= 1, wst.stops + ' stops');
+    if (wst.found) {
+      check('the race is not allowed to span the stop',
+        Pst.t[wst.i1] <= Pst.t[at] + 5,
+        'race ends ' + Pst.t[wst.i1].toFixed(0) + ' s, stop at ' + Pst.t[at].toFixed(0) + ' s');
+    }
+  }
 }
 
 section('Heart rate, cadence and race shape');

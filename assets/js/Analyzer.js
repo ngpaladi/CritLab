@@ -387,6 +387,23 @@ const Analyzer = (() => {
       onCircuit.fill(1);
     }
 
+    // ── Stops: a hard boundary the race cannot span ─────────────────────────
+    // Riders who come to a halt after the finish hand us an unambiguous end;
+    // riders who roll straight into a cool-down lap do not, and for them this
+    // finds nothing and costs nothing.
+    const stopSecs = cfg.stopSeconds || 20;
+    const stops = [];
+    {
+      let i = 0;
+      while (i < P.n) {
+        if (P.moving[i]) { i++; continue; }
+        let j = i;
+        while (j < P.n && !P.moving[j]) j++;
+        if ((j - i) * P.dt >= stopSecs) stops.push({ i0: i, i1: j - 1 });
+        i = j;
+      }
+    }
+
     // ── Pace: which laps were raced? ────────────────────────────────────────
     const lapInfo = laps.map((l, k) => {
       const secs = (l.i1 - l.i0) * P.dt;
@@ -420,9 +437,28 @@ const Analyzer = (() => {
       }
     }
     if (bestA < 0 || bestB - bestA + 1 < 3) return none;
+
+    // "I always start recording on the start line" — a fact about how you ride
+    // that no amount of signal processing can discover, and which removes the
+    // whole warm-up-detection guess when it is true.
+    let startedOnLine = false;
+    if (cfg.startsOnStartLine) { bestA = 0; startedOnLine = true; }
+    // If the recording began on the line then the recording *is* the start:
+    // there is nothing in front of it to call a warm-up, including whatever
+    // sits before the first detected lap crossing.
+    const forcedStart = startedOnLine ? 0 : null;
+
+    // A sustained stop after the racing ends it, whatever the pace says next.
+    let endedAtStop = false;
+    const firstStopAfter = stops.find(st => st.i0 > lapInfo[bestA].i1);
+    if (firstStopAfter) {
+      while (bestB > bestA && lapInfo[bestB].i0 > firstStopAfter.i0) bestB--;
+      endedAtStop = true;
+    }
+
     for (let k = bestA; k <= bestB; k++) lapInfo[k].inRace = true;
 
-    const i0 = laps[bestA].i0;
+    const i0 = forcedStart != null ? forcedStart : laps[bestA].i0;
     const i1 = laps[bestB].i1;
 
     // ── Phases ──────────────────────────────────────────────────────────────
@@ -437,8 +473,8 @@ const Analyzer = (() => {
       return sec;
     };
 
-    const approach = movingSecs(0, i0 - 1, false);
-    const warmup = movingSecs(0, i0 - 1, true);
+    const approach = startedOnLine ? 0 : movingSecs(0, i0 - 1, false);
+    const warmup = startedOnLine ? 0 : movingSecs(0, i0 - 1, true);
     const cooldown = movingSecs(i1 + 1, P.n - 1, true);
     const home = movingSecs(i1 + 1, P.n - 1, false);
 
@@ -473,10 +509,16 @@ const Analyzer = (() => {
       onCircuit,
       racePace,
       anchoredToStartLine: laps[0].source === 'manual',
+      startedOnLine,
+      endedAtStop,
+      stops: stops.length,
       found: true,
-      basis: (laps[0].source === 'manual'
-        ? 'your start/finish line, plus lap pace'
-        : 'circuit geometry and lap pace'),
+      basis: [
+        startedOnLine ? 'you start on the line' : null,
+        laps[0].source === 'manual' ? 'your start/finish line' : 'circuit geometry',
+        'lap pace',
+        endedAtStop ? 'and the stop after the finish' : null,
+      ].filter(Boolean).join(', '),
     };
   }
 

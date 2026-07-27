@@ -120,6 +120,22 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-section-title">How you record</div>
+          <p class="hint">
+            Things only you know, which no amount of signal processing can work out
+            from the file.
+          </p>
+          <label class="check">
+            <input type="checkbox" id="starts-on-line">
+            <span>I start recording on the start/finish line</span>
+          </label>
+          <p class="hint" style="margin-top:6px">
+            When this is on, nothing is ever trimmed from the front of a race and the
+            start/finish line is taken to be where the recording begins.
+          </p>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-section-title">Stored data</div>
           <p class="hint">Races are kept in this browser's IndexedDB. Nothing is uploaded anywhere.</p>
           <div class="btn-row" style="margin-top:10px">
@@ -171,6 +187,7 @@
       autoEl.checked = s.wxAuto !== false;
       roughEl.value  = String(s.wxRoughness || 0.1);
       document.getElementById('osm-enabled').checked = s.osmBasemap !== false;
+      document.getElementById('starts-on-line').checked = !!s.startsOnStartLine;
       statusEl.style.display = 'none';
       modal.style.display = '';
       keyEl.focus();
@@ -222,6 +239,11 @@
 
     autoEl.addEventListener('change', function () {
       Settings.set({ wxAuto: autoEl.checked });
+    });
+
+    document.getElementById('starts-on-line').addEventListener('change', function () {
+      Settings.set({ startsOnStartLine: this.checked });
+      window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { recording: true } }));
     });
 
     var osmEl = document.getElementById('osm-enabled');

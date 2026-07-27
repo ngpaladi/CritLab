@@ -398,6 +398,15 @@
         renderEmpty();
         return;
       }
+      if (e.detail && e.detail.recording) {
+        // How the rider records changes where the race is judged to start, so
+        // every crop decision has to be made again.
+        for (const r of state.races) { r.cropChecked = false; r.cropWindow = null; }
+        const entry = current();
+        if (entry) detectCrop(entry);
+        renderAll();
+        return;
+      }
       if (e.detail && e.detail.osm) {
         for (const r of state.races) { r.osm = null; r.osmError = null; }
         const entry = current();

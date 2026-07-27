@@ -27,6 +27,9 @@ const Settings = (() => {
     // map
     osmBasemap: true,
 
+    // recording habits — things only the rider knows
+    startsOnStartLine: false,
+
     // rider + machine
     mass: 78, crr: 0.004, cda: 0.32, lockCda: false,
     driveEff: 0.976, rotMass: 1.2, yawK: 0.15,
@@ -543,6 +546,8 @@ const RideStore = (() => {
       wPrime: pickNum(overrides && overrides.wPrime, P.wPrime, s.wPrime),
 
       startAnchor: (overrides && overrides.startAnchor) || null,
+      startsOnStartLine: !!s.startsOnStartLine,
+      stopSeconds: 20,
       windSource: (overrides && overrides.windSource) || s.windSource,
       windSpeed: pickNum(overrides && overrides.windSpeed, s.windSpeed),
       windDir: pickNum(overrides && overrides.windDir, s.windDir),
