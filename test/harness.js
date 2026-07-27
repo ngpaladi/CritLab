@@ -933,6 +933,201 @@ section('Strava-sourced activities');
     msg.slice(0, 80) + '…');
 }
 
+// ── 8d. Cropping, HR, cadence, race shape, circuits ─────────────────────────
+
+section('Race window and cropping');
+
+{
+  // Bolt a slow warm-up and a slow cool-down onto the synthetic crit and check
+  // both are found and neither eats into the race.
+  const base = Demo.build();
+  const pad = (n, speed, watts) => {
+    const o = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+    for (let k = 0; k < n; k++) {
+      o.t.push(k); o.lat.push(base.lat[k % base.lat.length]);
+      o.lon.push(base.lon[k % base.lon.length]); o.alt.push(base.alt[0]);
+      o.v.push(speed); o.watts.push(watts); o.dist.push(k * speed);
+    }
+    return o;
+  };
+  const warm = pad(300, 6, 90), cool = pad(240, 6, 80);
+  const lastT = base.t[base.t.length - 1], lastD = base.dist[base.dist.length - 1];
+  const padded = {
+    ...base,
+    t: warm.t.concat(base.t.map(x => x + 300), cool.t.map(x => x + 300 + lastT)),
+    lat: warm.lat.concat(base.lat, cool.lat),
+    lon: warm.lon.concat(base.lon, cool.lon),
+    alt: warm.alt.concat(base.alt, cool.alt),
+    v: warm.v.concat(base.v, cool.v),
+    watts: warm.watts.concat(base.watts, cool.watts),
+    dist: warm.dist.concat(base.dist.map(x => x + warm.dist[299]),
+      cool.dist.map(x => x + warm.dist[299] + lastD)),
+  };
+  padded.n = padded.t.length;
+
+  const Pp = RideStore.prepare(padded, { movingSpeed: 2.5 });
+  const w = Analyzer.detectRaceWindow(Pp, RideStore.configFor(Pp, {}));
+  check('the race is found inside a padded recording', w.found,
+    w.raceLaps + ' race laps of ' + w.totalLaps);
+  check('the warm-up is detected', w.warmupSeconds > 120,
+    w.warmupSeconds.toFixed(0) + ' s');
+  check('the cool-down is detected', w.cooldownSeconds > 100,
+    w.cooldownSeconds.toFixed(0) + ' s');
+  check('the race window keeps most of the racing',
+    (w.i1 - w.i0) * Pp.dt > base.t[base.t.length - 1] * 0.75,
+    ((w.i1 - w.i0) * Pp.dt).toFixed(0) + ' s of ' + lastT + ' s');
+
+  // Applying the crop must actually change what is analysed.
+  padded.crop = { startT: Pp.t[w.i0], endT: Pp.t[w.i1] };
+  const Pc = RideStore.prepare(padded, { movingSpeed: 2.5 });
+  check('cropping shortens the prepared ride', Pc.n < Pp.n,
+    Pc.n + ' samples from ' + Pp.n);
+  check('and drops the slow padding',
+    Physics.mean(Array.from(Pc.watts)) > Physics.mean(Array.from(Pp.watts)),
+    Physics.mean(Array.from(Pc.watts)).toFixed(0) + ' W vs ' +
+    Physics.mean(Array.from(Pp.watts)).toFixed(0) + ' W');
+  check('the crop start time is carried on the prepared ride', !!Pc.crop);
+
+  // A nonsense crop must be ignored rather than producing a broken ride.
+  const silly = { ...padded, crop: { startT: 10, endT: 12 } };
+  const Ps = RideStore.prepare(silly, { movingSpeed: 2.5 });
+  check('an impossibly short crop is refused', Ps.n > 100, Ps.n + ' samples');
+}
+
+section('Heart rate, cadence and race shape');
+
+{
+  // The synthetic ride has neither HR nor cadence, so build one that does.
+  const withHr = Demo.build();
+  const n = withHr.t.length;
+  withHr.hr = [];
+  withHr.cad = [];
+  for (let i = 0; i < n; i++) {
+    // Deliberate upward drift: the same power buys fewer watts per beat later.
+    const drift = 1 + 0.12 * (i / n);
+    withHr.hr.push(Math.round(120 + 55 * drift));
+    withHr.cad.push(withHr.watts[i] > 40 ? 88 : 0);
+  }
+  const Ph = RideStore.prepare(withHr, { movingSpeed: 2.5 });
+  check('HR survives prepare', !!Ph.hr && Ph.hr.length === Ph.n);
+  check('cadence survives prepare', !!Ph.cad && Ph.cad.length === Ph.n);
+
+  const cfgH = RideStore.configFor(Ph, {});
+  cfgH.rho = 1.2; cfgH.windSource = 'manual'; cfgH.windSpeed = 0;
+  const Ah = Analyzer.run(Ph, cfgH);
+
+  check('heart-rate summary produced', !!Ah.hr, Ah.hr ? Math.round(Ah.hr.avg) + ' bpm avg' : 'null');
+
+  check('cadence reported for the race', Ah.summary.avgCadence &&
+    Math.abs(Ah.summary.avgCadence.rpm - 88) < 3,
+    Ah.summary.avgCadence ? Ah.summary.avgCadence.rpm.toFixed(0) + ' rpm' : 'null');
+  check('freewheeling fraction reported',
+    isFinite(Ah.summary.avgCadence.coastPct),
+    Ah.summary.avgCadence.coastPct.toFixed(0) + '%');
+  check('cadence reported per corner',
+    Ah.turns.every(t => isFinite(t.cadence)),
+    Ah.turns.map(t => Math.round(t.cadence) + 'rpm').join(' '));
+
+  // A ride with no HR must simply not report any, rather than reporting zeros.
+  check('no HR data means no HR summary', A.hr === null || A.hr === undefined,
+    String(A.hr));
+}
+
+// Decoupling has to be tested at *constant* power: the demo deliberately lifts
+// the pace for the last three laps, so drifting HR against a rising power is
+// not a controlled experiment. Hold the watts still and drift only the pulse.
+{
+  const secs = 2400;
+  const flat = {
+    source: 'test', name: 'decoupling fixture', startTime: null, sport: 'cycling',
+    n: secs, t: [], watts: [], v: [], dist: [], alt: [], hr: [],
+    lat: null, lon: null, cad: null, temp: null, lapTimes: [],
+  };
+  let d = 0;
+  for (let i = 0; i < secs; i++) {
+    flat.t.push(i);
+    flat.watts.push(220);
+    flat.v.push(10);
+    d += 10; flat.dist.push(d);
+    flat.alt.push(50);
+    flat.hr.push(150 + 20 * (i / secs));       // +20 bpm drift at fixed watts
+  }
+  const Pf = RideStore.prepare(flat, { movingSpeed: 2.5 });
+  const cfgF = RideStore.configFor(Pf, {});
+  cfgF.rho = 1.2; cfgF.windSource = 'manual'; cfgF.windSpeed = 0;
+  const Af = Analyzer.run(Pf, cfgF);
+
+  check('constant power with drifting HR reads as positive decoupling',
+    Af.hr.decoupling > 5, '+' + Af.hr.decoupling.toFixed(1) + '%');
+  check('Pw:HR falls between the halves',
+    Af.hr.secondHalfPwHr < Af.hr.firstHalfPwHr,
+    Af.hr.firstHalfPwHr.toFixed(2) + ' → ' + Af.hr.secondHalfPwHr.toFixed(2));
+
+  // And a steady heart rate at steady power must read as no decoupling.
+  const steady = { ...flat, hr: flat.hr.map(() => 160) };
+  const Ps = RideStore.prepare(steady, { movingSpeed: 2.5 });
+  const cfgS = RideStore.configFor(Ps, {});
+  cfgS.rho = 1.2; cfgS.windSource = 'manual'; cfgS.windSpeed = 0;
+  const As = Analyzer.run(Ps, cfgS);
+  check('steady HR at steady power reads as no decoupling',
+    Math.abs(As.hr.decoupling) < 1, As.hr.decoupling.toFixed(2) + '%');
+}
+
+{
+  const sh = A.shape;
+  check('race shape computed', !!sh, sh ? sh.trend : 'null');
+  check('trend is one of the three', ['fading', 'steady', 'building'].includes(sh.trend), sh.trend);
+  check('the hardest lap is identified',
+    sh.hardest.lap >= 1 && sh.hardest.lap <= sh.laps &&
+    sh.hardest.np >= Math.max(...A.laps.map(l => l.np)) - 1e-6,
+    'lap ' + sh.hardest.lap + ' at ' + Math.round(sh.hardest.np) + ' W');
+  check('opening and closing thirds reported',
+    isFinite(sh.openingNp) && isFinite(sh.closingNp),
+    Math.round(sh.openingNp) + ' → ' + Math.round(sh.closingNp) + ' W');
+
+  // A deliberately fading set of laps must read as fading.
+  const fade = { np: [], }; // build synthetic lap rows
+  const rows = Array.from({ length: 12 }, (_, i) => ({
+    lap: i + 1, np: 300 - i * 8, exposed: 20, wbalEnd: 5,
+  }));
+  const f = Analyzer.raceShape(rows);
+  check('a monotonic decline reads as fading', f.trend === 'fading',
+    f.trend + ' at ' + f.slopePct.toFixed(1) + '%/lap');
+  const rise = rows.map((r, i) => ({ ...r, np: 240 + i * 8 }));
+  check('a monotonic rise reads as building',
+    Analyzer.raceShape(rise).trend === 'building',
+    Analyzer.raceShape(rise).trend);
+  const flat = rows.map(r => ({ ...r, np: 260 }));
+  check('a flat race reads as steady', Analyzer.raceShape(flat).trend === 'steady',
+    Analyzer.raceShape(flat).trend);
+  check('too few laps yields no shape', Analyzer.raceShape(rows.slice(0, 3)) === null);
+}
+
+section('Circuit identity');
+
+{
+  const here = { lat: 42.5450, lon: -71.6150, lapLen: 1073 };
+  check('a circuit matches itself', Analyzer.sameCircuit(here, { ...here }));
+  check('a slightly different racing line still matches',
+    Analyzer.sameCircuit(here, { lat: here.lat + 0.0005, lon: here.lon, lapLen: 1090 }));
+  check('a different venue does not match',
+    !Analyzer.sameCircuit(here, { lat: 41.3697, lon: -71.6668, lapLen: 1073 }));
+  check('the same place with a different course length does not match',
+    !Analyzer.sameCircuit(here, { ...here, lapLen: 1600 }));
+
+  const mk = (name, c) => ({ name, circuit: c, turns_: [] });
+  const groups = Analyzer.groupByCircuit([
+    mk('June', here), mk('Elsewhere', { lat: 41.37, lon: -71.67, lapLen: 1400 }),
+    mk('July', { ...here, lapLen: 1080 }),
+  ]);
+  check('races on one circuit are grouped together',
+    groups[0].races.length === 2 &&
+    groups[0].races.map(r => r.name).sort().join() === 'July,June',
+    groups.map(g => g.races.map(r => r.name).join('+')).join(' | '));
+  check('a lone circuit stays on its own',
+    groups.some(g => g.races.length === 1 && g.races[0].name === 'Elsewhere'));
+}
+
 // ── 9. OpenStreetMap basemap ────────────────────────────────────────────────
 
 section('OSM basemap');

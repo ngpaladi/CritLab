@@ -206,6 +206,71 @@ title: About
   backdrop.
 </p>
 
+<h2>Trimming the race out of the file</h2>
+
+<p>
+  A crit file is usually three things end to end: a warm-up or neutral roll-out,
+  the race, and a cool-down lap spinning with mates. All three look like riding,
+  and analysing them together quietly corrupts almost everything — W′ starts
+  draining before the start, the cool-down dilutes the exposure percentages, and
+  a soft-pedalled lap drags the sector medians toward "sheltered" for reasons
+  that have nothing to do with shelter.
+</p>
+
+<p>
+  CritLab finds the race by lap pace: race laps on a circuit are fast and
+  remarkably consistent, warm-up and cool-down laps are neither, so the race is
+  the longest run of consecutive laps close to the quickest sustained pace of
+  the day. If it finds meaningful riding either side, it <em>offers</em> to trim
+  and you decide. The trim is applied before anything is derived, so every
+  number downstream is measured on the race alone, and it can be undone at any
+  time.
+</p>
+
+<h2>Heart rate and cadence</h2>
+
+<p>
+  <b>Aerobic decoupling</b> compares your power-to-heart-rate ratio between the
+  first and second half of the race. A rising heart rate for the same watts is
+  the classic sign of running out of aerobic road — and it is a useful
+  counterweight to W′, which is a model where this is a measurement. Above about
+  8% is worth noticing; above 15% the race was limited by something other than
+  the repeated efforts.
+</p>
+
+<p>
+  <b>Cadence through the corners</b> is reported per turn, along with how much
+  of each corner you spent freewheeling. A corner taken coasting costs speed you
+  then buy back with watts on the exit, and the Corners tab prices exactly that.
+</p>
+
+<h2>The shape of the race</h2>
+
+<p>
+  Lap-by-lap normalised power says whether you faded, held, or built, which
+  single lap was the outlier you had to cover, and whether the last lap was your
+  hardest or the point at which there was nothing left.
+</p>
+
+<p>
+  This started life as a changepoint detector looking for the lap where the pace
+  stepped up and stayed up — the selection. Measured against four real crits, no
+  such step existed in any of them: one declined steadily with a big final lap,
+  one went out hard and faded, one was flat with a single enormous lap in the
+  middle. A detector that fires on nothing is worse than none, so it reports
+  what the laps actually do instead.
+</p>
+
+<h2>Racing the same circuit twice</h2>
+
+<p>
+  When two loaded races share a circuit — same centre within 250 m, lap lengths
+  within 12% — the Compare tab says so and lines the corners up side by side.
+  That is a different question from comparing four different courses: on one
+  circuit, Turn 3 means the same thing in every row, so a corner that keeps
+  costing you speed is a line to work on rather than a fitness problem.
+</p>
+
 <h2>What it needs from a file</h2>
 
 <ul>

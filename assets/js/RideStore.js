@@ -153,7 +153,23 @@ const RideStore = (() => {
    * fill a hole would put phantom efforts in the surge ledger.
    */
   function prepare(raw, cfg) {
-    const src = raw.t.map(Number);
+    let src = raw.t.map(Number);
+    let raw0 = 0, rawN = src.length;
+
+    // A crop is applied here, before anything is derived, so that every
+    // downstream number — laps, W′, exposure, sector medians — is computed on
+    // the race alone. Trimming afterwards would leave W′ already drained by the
+    // warm-up and the percentages diluted by the cool-down.
+    if (raw.crop && isFinite(raw.crop.startT) && isFinite(raw.crop.endT)) {
+      const t0abs = src[0];
+      while (raw0 < src.length - 1 && src[raw0] - t0abs < raw.crop.startT) raw0++;
+      rawN = raw0;
+      while (rawN < src.length && src[rawN] - t0abs <= raw.crop.endT) rawN++;
+      if (rawN - raw0 < 10) { raw0 = 0; rawN = src.length; }   // nonsense crop
+      src = src.slice(raw0, rawN);
+    }
+    const clip = a => (Array.isArray(a) || ArrayBuffer.isView(a)) ? Array.prototype.slice.call(a, raw0, rawN) : a;
+
     const nSrc = src.length;
     if (nSrc < 10) throw new Error('This ride has too few samples to analyse.');
 
@@ -206,17 +222,17 @@ const RideStore = (() => {
     };
 
     // Position and altitude hold through a gap (you were parked, not teleported).
-    const lat = raw.lat ? resampleGeo(raw.lat, n, lo, hi, frac, gap) : null;
-    const lon = raw.lon ? resampleGeo(raw.lon, n, lo, hi, frac, gap) : null;
-    const alt = resample(raw.alt, { hold: true }) || new Float64Array(n);
-    const hr = resample(raw.hr, { hold: true });
-    const cad = resample(raw.cad);
-    const temp = resample(raw.temp, { hold: true });
-    const watts = resample(raw.watts) || new Float64Array(n);
+    const lat = raw.lat ? resampleGeo(clip(raw.lat), n, lo, hi, frac, gap) : null;
+    const lon = raw.lon ? resampleGeo(clip(raw.lon), n, lo, hi, frac, gap) : null;
+    const alt = resample(clip(raw.alt), { hold: true }) || new Float64Array(n);
+    const hr = resample(clip(raw.hr), { hold: true });
+    const cad = resample(clip(raw.cad));
+    const temp = resample(clip(raw.temp), { hold: true });
+    const watts = resample(clip(raw.watts)) || new Float64Array(n);
 
     // Distance is monotone and holds across gaps.
-    let dist = resample(raw.dist, { hold: true });
-    let v = resample(raw.v);
+    let dist = resample(clip(raw.dist), { hold: true });
+    let v = resample(clip(raw.v));
 
     if (!dist && !v) throw new Error('This ride has neither speed nor distance data.');
 
@@ -264,7 +280,9 @@ const RideStore = (() => {
     if (Array.isArray(raw.lapTimes) && raw.lapTimes.length) {
       const set = new Set([0]);
       for (const lt of raw.lapTimes) {
-        const idx = Math.round((lt - (src[0] - t0)) / dt);
+        // lapTimes are relative to the *uncropped* start, so shift them by
+        // however much the crop removed from the front.
+        const idx = Math.round((lt - (src[0] - raw.t[0])) / dt);
         if (idx > 0 && idx < n) set.add(idx);
       }
       set.add(n - 1);
@@ -274,12 +292,14 @@ const RideStore = (() => {
 
     return {
       id: raw.id, name: raw.name, source: raw.source, sourceId: raw.sourceId || null,
-      startTime: raw.startTime || null,
+      startTime: raw.startTime ? raw.startTime + (src[0] - raw.t[0]) : null,
       sport: raw.sport || 'cycling',
       n, dt, t,
       lat, lon, alt: altS, v, watts, hr, cad, dist, temp,
       moving, gap, theta, slope, accel, heading, curvature,
       lapIndices,
+      crop: raw.crop || null,
+      croppedFrom: raw.t.length,
       ftp: raw.ftp || null, weightKg: raw.weightKg || null,
       cp: raw.cp || null, wPrime: raw.wPrime || null,
       totals: raw.totals || {},
@@ -479,7 +499,7 @@ const RideStore = (() => {
       'id', 'name', 'source', 'sourceId', 'startTime', 'sport', 'n',
       't', 'lat', 'lon', 'alt', 'v', 'watts', 'hr', 'cad', 'dist', 'temp',
       'lapTimes', 'ftp', 'weightKg', 'cp', 'wPrime', 'totals', 'device', 'savedAt',
-      'startAnchor',
+      'startAnchor', 'crop',
     ];
     const out = {};
     for (const k of keep) if (ride[k] !== undefined) out[k] = toPlain(ride[k]);

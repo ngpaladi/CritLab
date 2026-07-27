@@ -71,12 +71,19 @@ const Analyzer = (() => {
     const headings = exposureByHeading(P, ratio);
     const summary = summarise(P, ratio, solo, wbal, laps, surges, turns, cfg);
     const finale = summariseFinale(P, ratio, wbal, laps, surges, cfg);
+    const hr = summariseHr(P, cfg, 0, P.n - 1);
+    const shape = raceShape(lapRows);
 
     return {
       cfg, rho, wind, cda: wind.cda,
       solo, soloRaw, wattsS, soloS, ratio, yaw, wbal,
       laps: lapRows, lapBounds: laps, meanLap, turns, sectors, surges,
-      headings, summary, finale,
+      headings, summary, finale, hr, shape,
+      circuit: (P.lat && meanLap) ? (() => {
+        let la = 0, lo = 0;
+        for (let j = 0; j < meanLap.n; j++) { la += meanLap.lat[j]; lo += meanLap.lon[j]; }
+        return { lat: la / meanLap.n, lon: lo / meanLap.n, lapLen: meanLap.lapLen };
+      })() : null,
     };
   }
 
@@ -313,6 +320,81 @@ const Analyzer = (() => {
       const d = P.dist[l.i1] - P.dist[l.i0];
       return d > 0.75 * med && d < 1.35 * med;
     });
+  }
+
+  // ── Race window ───────────────────────────────────────────────────────────
+
+  /**
+   * Find where the race actually is inside the recording.
+   *
+   * A crit file is usually three things end to end: a warm-up or neutral
+   * roll-out, the race, and a cool-down lap or two spinning with mates. All
+   * three look like riding, and lumping them together quietly corrupts almost
+   * every number here — W′ starts draining during the warm-up, the cool-down
+   * dilutes the exposure percentages, and a soft-pedalled lap drags the sector
+   * medians toward "sheltered" for reasons that have nothing to do with
+   * shelter.
+   *
+   * The signal is lap pace. Race laps on a circuit are fast and remarkably
+   * consistent; warm-up and cool-down laps are neither. So the race is the
+   * longest run of consecutive laps whose pace sits close to the quickest
+   * sustained pace of the day.
+   *
+   * @returns {{i0, i1, warmupSeconds, cooldownSeconds, raceLaps, totalLaps,
+   *            found, basis}}
+   */
+  function detectRaceWindow(P, cfg) {
+    const none = {
+      i0: 0, i1: P.n - 1, warmupSeconds: 0, cooldownSeconds: 0,
+      raceLaps: 0, totalLaps: 0, found: false, basis: 'whole recording',
+    };
+
+    const laps = detectLaps(P, cfg);
+    if (!laps.length || laps[0].source === 'none' || laps.length < 4) return none;
+
+    const speeds = laps.map(l => {
+      const secs = (l.i1 - l.i0) * P.dt;
+      return secs > 0 ? (P.dist[l.i1] - P.dist[l.i0]) / secs : 0;
+    });
+
+    // "Race pace" is the upper quartile of lap speeds, not the mean: a couple
+    // of slow cool-down laps must not drag the reference down with them.
+    const sorted = speeds.slice().sort((a, b) => a - b);
+    const racePace = sorted[Math.floor(sorted.length * 0.75)];
+    if (!(racePace > 0)) return none;
+
+    const tol = cfg.raceLapTolerance || 0.88;          // within 12% of race pace
+    const ok = speeds.map(v => v >= racePace * tol);
+
+    // Longest consecutive run of race-pace laps.
+    let bestA = -1, bestB = -1, a = -1;
+    for (let k = 0; k <= ok.length; k++) {
+      if (k < ok.length && ok[k]) { if (a < 0) a = k; continue; }
+      if (a >= 0) {
+        if (bestA < 0 || k - a > bestB - bestA + 1) { bestA = a; bestB = k - 1; }
+        a = -1;
+      }
+    }
+    if (bestA < 0 || bestB - bestA + 1 < 3) return none;
+
+    const i0 = laps[bestA].i0;
+    const i1 = laps[bestB].i1;
+
+    // Only count time the rider was actually moving: an hour parked in the car
+    // park before the start is not a warm-up anybody wants reported.
+    let warm = 0, cool = 0;
+    for (let i = 0; i < i0; i++) if (P.moving[i]) warm += P.dt;
+    for (let i = i1 + 1; i < P.n; i++) if (P.moving[i]) cool += P.dt;
+
+    return {
+      i0, i1,
+      warmupSeconds: warm,
+      cooldownSeconds: cool,
+      raceLaps: bestB - bestA + 1,
+      totalLaps: laps.length,
+      found: true,
+      basis: 'lap pace within ' + Math.round((1 - tol) * 100) + '% of race pace',
+    };
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────────
@@ -730,6 +812,19 @@ const Analyzer = (() => {
         ev.recoverS = rec < 0 ? null : (rec - apex) * P.dt;
         ev.exitKj = above / 1000;
         ev.exitPeak = peak;
+        // Cadence through the corner: were you pedalling, or freewheeling and
+        // then having to spin back up? A corner taken coasting costs time you
+        // then buy back with watts on the exit.
+        if (P.cad) {
+          let cadSum = 0, cadN = 0, coast = 0, total = 0;
+          for (let k = ev.i0; k <= Math.min(P.n - 1, ev.i1); k++) {
+            total++;
+            if (P.cad[k] > 5) { cadSum += P.cad[k]; cadN++; } else coast++;
+          }
+          ev.cadence = cadN ? cadSum / cadN : 0;
+          ev.coastFrac = total ? coast / total : 0;
+        }
+
         ev.ratioIn = meanFinite(ratio, Math.max(0, apex - backS), apex);
         ev.ratioOut = meanFinite(ratio, apex, recEnd);
         ev.radius = ev.turned > 0 ? (P.dist[ev.i1] - P.dist[ev.i0]) / (ev.turned * Math.PI / 180) : null;
@@ -758,6 +853,10 @@ const Analyzer = (() => {
       // Spread across laps: a corner you take inconsistently is one you are
       // arriving at in a different position each time.
       turn.lossSd = stdev(evs.map(e => e.lossV));
+      if (evs.some(e => e.cadence != null)) {
+        turn.cadence = Physics.mean(evs.map(e => e.cadence).filter(isFinite));
+        turn.coastFrac = Physics.mean(evs.map(e => e.coastFrac).filter(isFinite));
+      }
     }
     return turns;
   }
@@ -1106,6 +1205,15 @@ const Analyzer = (() => {
       wbalEmptySeconds: wbal.depletedSeconds,
       wbalTau: wbal.tau,
       elevation,
+      avgCadence: P.cad ? (() => {
+        let sum = 0, k = 0, coast = 0, tot = 0;
+        for (let i = 0; i < P.n; i++) {
+          if (!P.moving[i]) continue;
+          tot++;
+          if (P.cad[i] > 5) { sum += P.cad[i]; k++; } else coast++;
+        }
+        return { rpm: k ? sum / k : NaN, coastPct: tot ? (100 * coast) / tot : NaN };
+      })() : null,
     };
   }
 
@@ -1214,7 +1322,161 @@ const Analyzer = (() => {
     };
   }
 
+  // ── Heart rate ────────────────────────────────────────────────────────────
+
+  /**
+   * Aerobic decoupling: how much your heart rate drifted up relative to the
+   * power it was buying.
+   *
+   * Split the race in half by moving time and compare the power-to-heart-rate
+   * ratio of each half. A rising heart rate for the same watts is the classic
+   * sign that you are running out of road — and in a crit it is the honest
+   * counterweight to W′, which is a model, where this is measured.
+   *
+   * The convention is Pw:HR using normalised power, and positive means drift.
+   */
+  function summariseHr(P, cfg, i0, i1) {
+    if (!P.hr) return null;
+
+    const idx = [];
+    for (let i = i0; i <= i1; i++) if (P.moving[i] && P.hr[i] > 30) idx.push(i);
+    if (idx.length < 240) return null;                 // under 4 min: meaningless
+
+    const half = Math.floor(idx.length / 2);
+    const ratio = list => {
+      const w = list.map(i => P.watts[i]);
+      const np = Physics.normalizedPower(w, P.dt);
+      const hr = Physics.mean(list.map(i => P.hr[i]));
+      return hr > 0 ? np / hr : NaN;
+    };
+    const first = ratio(idx.slice(0, half));
+    const second = ratio(idx.slice(half));
+    const decoupling = isFinite(first) && first > 0 ? ((first - second) / first) * 100 : NaN;
+
+    const hrs = idx.map(i => P.hr[i]);
+    const sorted = hrs.slice().sort((a, b) => a - b);
+
+    return {
+      avg: Physics.mean(hrs),
+      max: sorted[sorted.length - 1],
+      p95: Physics.percentile(sorted, 0.95),
+      decoupling,
+      firstHalfPwHr: first,
+      secondHalfPwHr: second,
+      seconds: idx.length * P.dt,
+    };
+  }
+
+  // ── The selection ─────────────────────────────────────────────────────────
+
+  /**
+   * The shape of the race, lap by lap.
+   *
+   * The first version of this looked for a changepoint — the lap where the pace
+   * stepped up and stayed up. Measured against four real crits, no such step
+   * exists in any of them: one declines steadily with a big final lap, one goes
+   * out hard and fades, one is flat with a single enormous lap in the middle.
+   * A detector that fires on nothing is worse than no detector, so this reports
+   * what the laps actually do.
+   *
+   * Three things, each of which is a different race:
+   *   trend    — did you fade, hold, or build?
+   *   hardest  — which single lap was the outlier you had to cover?
+   *   finish   — was the last lap your hardest, or had you nothing left?
+   */
+  function raceShape(lapRows) {
+    if (!lapRows || lapRows.length < 5) return null;
+
+    const np = lapRows.map(l => l.np);
+    const n = np.length;
+    const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+    const avg = mean(np);
+    if (!(avg > 0)) return null;
+
+    // Least-squares slope of NP against lap number, as % of average per lap.
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < n; i++) { sx += i; sy += np[i]; sxx += i * i; sxy += i * np[i]; }
+    const den = n * sxx - sx * sx;
+    const slope = den !== 0 ? (n * sxy - sx * sy) / den : 0;
+    const slopePct = (slope / avg) * 100;
+
+    const sd = stdev(np);
+    let hi = 0;
+    for (let i = 1; i < n; i++) if (np[i] > np[hi]) hi = i;
+    const hardest = {
+      lap: lapRows[hi].lap,
+      np: np[hi],
+      overAvgPct: ((np[hi] - avg) / avg) * 100,
+      z: sd > 0 ? (np[hi] - avg) / sd : 0,
+      exposed: lapRows[hi].exposed,
+    };
+
+    const last = lapRows[n - 1];
+    const finish = {
+      lap: last.lap,
+      np: last.np,
+      overAvgPct: ((last.np - avg) / avg) * 100,
+      isHardest: hi === n - 1,
+    };
+
+    const thirds = Math.max(1, Math.floor(n / 3));
+    const opening = mean(np.slice(0, thirds));
+    const closing = mean(np.slice(n - thirds));
+
+    let trend;
+    if (slopePct < -0.6) trend = 'fading';
+    else if (slopePct > 0.6) trend = 'building';
+    else trend = 'steady';
+
+    return {
+      laps: n, avgNp: avg, sd,
+      slopePct, trend,
+      openingNp: opening, closingNp: closing,
+      openingVsClosingPct: ((opening - closing) / closing) * 100,
+      hardest, finish,
+    };
+  }
+
   // ── Comparison ────────────────────────────────────────────────────────────
+
+  /**
+   * A stable fingerprint for a circuit, so the same course ridden on different
+   * days can be recognised as the same course.
+   *
+   * Centroid plus lap length, both robust: the centroid of a closed loop barely
+   * moves between visits even if the racing line does, and lap length pins down
+   * which of two nearby circuits at the same venue was used.
+   */
+  function circuitFingerprint(P, A) {
+    if (!P.lat || !A.meanLap) return null;
+    const ml = A.meanLap;
+    let lat = 0, lon = 0;
+    for (let j = 0; j < ml.n; j++) { lat += ml.lat[j]; lon += ml.lon[j]; }
+    return { lat: lat / ml.n, lon: lon / ml.n, lapLen: ml.lapLen };
+  }
+
+  /** Were these two races ridden on the same circuit? */
+  function sameCircuit(a, b) {
+    if (!a || !b) return false;
+    const mLat = 111320, mLon = 111320 * Math.cos(a.lat * Math.PI / 180);
+    const apart = Math.hypot((b.lon - a.lon) * mLon, (b.lat - a.lat) * mLat);
+    const lenRatio = a.lapLen > 0 && b.lapLen > 0
+      ? Math.abs(a.lapLen - b.lapLen) / Math.max(a.lapLen, b.lapLen) : 1;
+    // Within 250 m of the same centre and lap lengths within 12%.
+    return apart < 250 && lenRatio < 0.12;
+  }
+
+  /** Group compare rows into circuits, most-visited first. */
+  function groupByCircuit(rows) {
+    const groups = [];
+    for (const r of rows) {
+      const hit = groups.find(g => sameCircuit(g.fingerprint, r.circuit));
+      if (hit) { hit.races.push(r); }
+      else groups.push({ fingerprint: r.circuit, races: [r] });
+    }
+    groups.sort((a, b) => b.races.length - a.races.length);
+    return groups;
+  }
 
   /** Reduce an analysis to the row shown in the Compare tab. */
   function compareRow(ride, analysis) {
@@ -1242,6 +1504,10 @@ const Analyzer = (() => {
       windDir: analysis.wind.dirFrom,
       windSource: analysis.wind.source,
       cda: analysis.cda,
+      circuit: analysis.circuit || null,
+      hr: analysis.hr,
+      shape: analysis.shape,
+      turns_: analysis.turns,
     };
   }
 
@@ -1284,7 +1550,7 @@ const Analyzer = (() => {
 
   return {
     run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, nearestTrackIndex, detectTurns, buildSectors, detectSurges,
-    exposureByHeading, elevationClosure, compareRow, angleDelta, R_EARTH,
+    exposureByHeading, elevationClosure, detectRaceWindow, summariseHr, raceShape, circuitFingerprint, sameCircuit, groupByCircuit, compareRow, angleDelta, R_EARTH,
     buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };
 })();

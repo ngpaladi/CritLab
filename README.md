@@ -34,6 +34,15 @@ No server, no account, no upload. Races live in your browser's IndexedDB.
 - **W′ battery** — a live gauge on the replay showing the anaerobic reserve at
   that instant, whether it is draining or refilling, and how it compares to the
   low point of the race.
+- **Race trimming** — finds the race inside a file that also contains a warm-up
+  and a cool-down lap, and offers to trim so W′, exposure and sector medians are
+  measured on the racing alone.
+- **Heart rate and cadence** — aerobic decoupling as a measured counterweight to
+  modelled W′, plus per-corner cadence and how much of each turn you freewheeled.
+- **Race shape** — whether you faded, held or built; which lap was the outlier
+  you had to cover; whether the last lap was your hardest.
+- **Same-circuit comparison** — races on one circuit are grouped and compared
+  corner for corner, which is a different question from comparing four courses.
 - **Match ledger and W′ balance** — Skiba's differential model, with efforts
   classified by whether they were launched from a wheel or from the wind, and
   corner-exit accelerations separated from tactical decisions.

@@ -739,3 +739,22 @@ table.data td.dim { color: var(--text-muted); }
   .busy-overlay, .busy-card { animation: none; }
   .ride-refresh.spinning { animation: none; }
 }
+
+/* ── Crop prompt ────────────────────────────────────────────────────────── */
+
+.crop-prompt {
+  background: var(--surface);
+  border: 1px solid var(--st-warn);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.crop-prompt-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.crop-prompt p { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 10px; }
+.crop-prompt .btn-row { gap: 8px; }
+.crop-active {
+  background: rgba(88,166,255,.08);
+  border-color: var(--accent);
+}
+.crop-active .crop-prompt-title { color: var(--accent); }

@@ -172,11 +172,39 @@ async function settle(ms = 250) {
     !/NaN|undefined/.test($('stat-row').textContent),
     $('stat-row').textContent.replace(/\s+/g, ' ').slice(0, 120));
 
+  // The crop prompt: the sample race is a clean recording, so either it offers
+  // a trim or it stays silent — but it must never be broken markup.
+  {
+    const cp = $('crop-prompt');
+    check('crop prompt slot exists', !!cp);
+    const offered = /Trim to the race/.test(cp.textContent);
+    check('crop prompt is either a valid offer or absent',
+      !cp.textContent.trim() || offered || /Trimmed to the race/.test(cp.textContent),
+      cp.textContent.replace(/\s+/g, ' ').slice(0, 70) || '(none)');
+    if (offered) {
+      const before = window.CritLab.state.races[0].P.n;
+      $('crop-yes').dispatchEvent(new window.Event('click'));
+      await settle(900);
+      check('accepting the trim shortens the ride',
+        window.CritLab.state.races[0].P.n < before,
+        window.CritLab.state.races[0].P.n + ' from ' + before);
+      check('and offers to undo it', !!$('crop-undo'));
+      $('crop-undo').dispatchEvent(new window.Event('click'));
+      await settle(900);
+      check('undo restores the whole recording',
+        window.CritLab.state.races[0].P.n === before,
+        window.CritLab.state.races[0].P.n + ' vs ' + before);
+    }
+  }
+
   const findings = $('findings').textContent;
   check('findings generated', findings.length > 200, findings.length + ' chars');
   check('findings name the leak sector', /least sheltered stretch|sat in the wind/i.test(findings));
   check('findings cover the corners', /Turn \d/.test(findings));
   check('findings cover the finale', /finale|last \d laps/i.test(findings));
+  check('findings describe the shape of the race',
+    /faded|built into|even pace/i.test(findings),
+    (findings.match(/You (faded|built into|raced at)[^.]*/) || ['(none)'])[0].slice(0, 60));
   check('no NaN in findings', !/NaN|undefined/.test(findings),
     (findings.match(/.{0,40}(NaN|undefined).{0,40}/) || [''])[0]);
 

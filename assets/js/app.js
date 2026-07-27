@@ -87,6 +87,7 @@
       const entry = addRace(raw);
       entry.P = RideStore.prepare(raw, { movingSpeed: 2.5 });
       if (!entry.P.hasPower) throw new Error('No power data in this file — CritLab needs watts.');
+      detectCrop(entry);
       if (persist) {
         try { await RideStore.put(raw); } catch (err) { console.warn('Could not save race:', err); }
       }
@@ -110,6 +111,7 @@
     if (!entry) { renderEmpty(); return; }
 
     if (!entry.P) entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
+    detectCrop(entry);
 
     renderRaceList();
     // Both are optional network fetches; run them together rather than serially.
@@ -176,6 +178,95 @@
   /** The basemap to draw, or null when it is off or unavailable. */
   function basemap(entry) {
     return (Settings.get('osmBasemap') !== false && entry && entry.osm) ? entry.osm : null;
+  }
+
+  /**
+   * Work out where the race sits inside the recording, so the user can be
+   * offered a trim. Computed on the *uncropped* ride, so the offer is made
+   * once and re-offering after a trim is impossible.
+   */
+  function detectCrop(entry) {
+    if (entry.raw.crop || entry.cropChecked) return;
+    entry.cropChecked = true;
+    try {
+      const cfg = RideStore.configFor(entry.P, {});
+      const w = Analyzer.detectRaceWindow(entry.P, cfg);
+      // Only worth mentioning if there is a real amount to remove.
+      if (w.found && (w.warmupSeconds > 60 || w.cooldownSeconds > 60)) {
+        entry.cropSuggestion = {
+          startT: entry.P.t[w.i0],
+          endT: entry.P.t[w.i1],
+          warmupSeconds: w.warmupSeconds,
+          cooldownSeconds: w.cooldownSeconds,
+          raceLaps: w.raceLaps,
+          totalLaps: w.totalLaps,
+        };
+      }
+    } catch (_) { /* cropping is a convenience, never a blocker */ }
+  }
+
+  function renderCropPrompt() {
+    const el = $('crop-prompt');
+    const entry = current();
+    if (!el) return;
+    if (!entry) { el.innerHTML = ''; return; }
+
+    if (entry.raw.crop) {
+      const c = entry.raw.crop;
+      el.innerHTML =
+        '<div class="crop-prompt crop-active">' +
+        '<div class="crop-prompt-title">Trimmed to the race</div>' +
+        '<p>Analysing ' + Charts.fmtClock(c.endT - c.startT) + ' of racing. ' +
+        'Everything here — laps, W′, exposure — is measured on that window alone.</p>' +
+        '<div class="btn-row"><button class="btn btn-sm" id="crop-undo">Use the whole recording</button></div>' +
+        '</div>';
+      $('crop-undo').addEventListener('click', () => applyCrop(entry, null));
+      return;
+    }
+
+    const sug = entry.cropSuggestion;
+    if (!sug) { el.innerHTML = ''; return; }
+
+    const bits = [];
+    if (sug.warmupSeconds > 60) bits.push(Charts.fmtClock(sug.warmupSeconds) + ' before the race');
+    if (sug.cooldownSeconds > 60) bits.push(Charts.fmtClock(sug.cooldownSeconds) + ' after it');
+
+    el.innerHTML =
+      '<div class="crop-prompt">' +
+      '<div class="crop-prompt-title">This file has riding either side of the race</div>' +
+      '<p>Found ' + sug.raceLaps + ' laps at race pace, with ' + bits.join(' and ') +
+      '. Warm-up and cool-down laps drain W′ before the start and dilute the exposure ' +
+      'percentages afterwards, so trimming usually makes the numbers mean what you think ' +
+      'they mean.</p>' +
+      '<div class="btn-row">' +
+      '<button class="btn btn-primary btn-sm" id="crop-yes">Trim to the race</button>' +
+      '<button class="btn btn-sm" id="crop-no">Keep everything</button>' +
+      '</div></div>';
+
+    $('crop-yes').addEventListener('click', () =>
+      applyCrop(entry, { startT: sug.startT, endT: sug.endT }));
+    $('crop-no').addEventListener('click', () => {
+      entry.cropSuggestion = null;
+      renderCropPrompt();
+    });
+  }
+
+  async function applyCrop(entry, crop) {
+    entry.raw.crop = crop;
+    entry.cropSuggestion = null;
+    entry.cropChecked = !!crop;
+    try {
+      entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
+    } catch (err) {
+      alert('Could not apply that trim: ' + (err.message || err));
+      entry.raw.crop = null;
+      entry.P = RideStore.prepare(entry.raw, { movingSpeed: 2.5 });
+    }
+    entry.A = null;
+    entry.wx = null; entry.wxError = null;      // the race window moved in time
+    try { await RideStore.put(entry.raw); } catch (_) {}
+    await ensureWeather(entry);
+    recompute();
   }
 
   /** Build the config + run the analysis for one race. */
@@ -800,6 +891,7 @@
 
   function renderEmpty() {
     $('stat-row').innerHTML = '';
+    if ($('crop-prompt')) $('crop-prompt').innerHTML = '';
     $('findings').innerHTML =
       '<p class="hint">Load a <b>.fit</b> file, pull a ride from intervals.icu, or press ' +
       '<b>Load sample race</b> to see what CritLab does.</p>';
@@ -877,6 +969,7 @@
   }
 
   function renderAll() {
+    renderCropPrompt();
     renderConditions();
     renderStats();
     renderFindings();
@@ -970,8 +1063,31 @@
       { val: fmtPct(f.exposed), label: 'Exposure in the finale', sub: f.basis,
         color: f.exposed > 45 ? 'var(--st-warn)' : undefined },
       { val: s.laps || '—', label: 'Laps detected',
-        sub: s.turns + ' corners · ' + (s.lapSource === 'device' ? 'lap button' : s.lapSource === 'gps' ? 'GPS' : 'none') },
+        sub: s.turns + ' corners · ' + (s.lapSource === 'manual' ? 'your start line'
+          : s.lapSource === 'device' ? 'lap button' : s.lapSource === 'gps' ? 'GPS' : 'none') },
     ];
+
+    const hr = entry.A.hr;
+    if (hr) {
+      tiles.push({
+        val: Math.round(hr.avg), unit: 'bpm', label: 'Average heart rate',
+        sub: 'peak ' + Math.round(hr.max) + ' · p95 ' + Math.round(hr.p95),
+      });
+      if (isFinite(hr.decoupling)) {
+        tiles.push({
+          val: (hr.decoupling >= 0 ? '+' : '') + hr.decoupling.toFixed(1) + '%',
+          label: 'Aerobic decoupling',
+          sub: 'Pw:HR ' + hr.firstHalfPwHr.toFixed(2) + ' → ' + hr.secondHalfPwHr.toFixed(2),
+          color: hr.decoupling > 8 ? 'var(--st-warn)' : hr.decoupling > 15 ? 'var(--st-critical)' : undefined,
+        });
+      }
+    }
+    if (s.avgCadence && isFinite(s.avgCadence.rpm)) {
+      tiles.push({
+        val: Math.round(s.avgCadence.rpm), unit: 'rpm', label: 'Cadence when pedalling',
+        sub: Math.round(s.avgCadence.coastPct) + '% of the race freewheeling',
+      });
+    }
 
     $('stat-row').innerHTML = tiles.map(t =>
       '<div class="stat"><div class="stat-val"' + (t.color ? ' style="color:' + t.color + '"' : '') + '>' +
@@ -1093,7 +1209,62 @@
       }
     }
 
-    // 6. Data-quality caveats worth surfacing.
+    // 6. The shape of the race.
+    const shape = A.shape;
+    if (shape) {
+      const bits = [];
+      if (shape.trend === 'fading') {
+        bits.push('Your pace fell about ' + Math.abs(shape.slopePct).toFixed(1) +
+          '% per lap — opening third ' + Math.round(shape.openingNp) + ' W against ' +
+          Math.round(shape.closingNp) + ' W at the end.');
+      } else if (shape.trend === 'building') {
+        bits.push('You built through the race, gaining about ' + shape.slopePct.toFixed(1) +
+          '% per lap — ' + Math.round(shape.openingNp) + ' W opening third, ' +
+          Math.round(shape.closingNp) + ' W closing.');
+      } else {
+        bits.push('You held a level pace throughout — opening and closing thirds within ' +
+          Math.abs(shape.openingVsClosingPct).toFixed(0) + '% of each other.');
+      }
+
+      bits.push('Lap ' + shape.hardest.lap + ' was the hardest at ' +
+        Math.round(shape.hardest.np) + ' W, ' + shape.hardest.overAvgPct.toFixed(0) +
+        '% over your race average' +
+        (shape.hardest.z > 2 ? ' — a genuine outlier, so that is the move you had to cover'
+          : '') + '.');
+
+      if (shape.finish.isHardest) {
+        bits.push('It was also your last lap, so you finished with something in hand.');
+      } else if (shape.finish.overAvgPct < -8) {
+        bits.push('The last lap came in ' + Math.abs(shape.finish.overAvgPct).toFixed(0) +
+          '% below average, which is what running out looks like.');
+      }
+
+      out.push({
+        kind: shape.trend === 'fading' && shape.finish.overAvgPct < -8 ? 'warning' : 'info',
+        title: shape.trend === 'fading' ? 'You faded through the race'
+          : shape.trend === 'building' ? 'You built into the race'
+          : 'You raced at an even pace',
+        body: bits.join(' '),
+      });
+    }
+
+    // 7. What the heart rate says, as a measured counterweight to modelled W′.
+    if (A.hr && isFinite(A.hr.decoupling)) {
+      const d = A.hr.decoupling;
+      out.push({
+        kind: d > 15 ? 'critical' : d > 8 ? 'warning' : 'good',
+        title: 'Heart rate ' + (d > 3 ? 'drifted ' + d.toFixed(1) + '% off your power'
+          : d < -3 ? 'held better than your power (' + d.toFixed(1) + '%)'
+          : 'tracked your power to within ' + Math.abs(d).toFixed(1) + '%'),
+        body: 'Power-to-heart-rate went ' + A.hr.firstHalfPwHr.toFixed(2) + ' → ' +
+          A.hr.secondHalfPwHr.toFixed(2) + ' between the first and second half. ' +
+          (d > 8
+            ? 'That much drift means you were running out of aerobic road, not just anaerobic — the model’s W′ is only half the story here.'
+            : 'Little drift: what limited you was the repeated efforts rather than the aerobic load underneath them.'),
+      });
+    }
+
+    // 8. Data-quality caveats worth surfacing.
     const caveats = [];
     if (!entry.P.hasGps) caveats.push('no GPS, so gradient, heading, laps and corners are unavailable');
     if (A.wind.source === 'fit' && !A.wind.ok) caveats.push('the wind fit did not converge (' + (A.wind.note || 'weak signal') + ')');
@@ -1324,10 +1495,13 @@
         'This needs GPS and at least two similar laps.</div>';
       return;
     }
-    const head = ['Turn', 'Direction', 'Passes', 'Radius', 'Entry', 'Apex', 'Scrubbed',
-      'Recovery', 'Exit peak', 'Exit cost / lap', 'Total', 'Exit ratio'];
+    const hasCad = A.turns.some(t => isFinite(t.cadence));
+    const head = ['Turn', 'Type', 'Direction', 'Passes', 'Radius', 'Entry', 'Apex', 'Scrubbed',
+      'Recovery', 'Exit peak', 'Exit cost / lap', 'Total', 'Exit ratio']
+      .concat(hasCad ? ['Cadence', 'Freewheeling'] : []);
     const rows = A.turns.map(t => [
       t.name,
+      t.type || '—',
       t.dir + ' ' + Math.round(t.turned) + '°',
       t.passes,
       isFinite(t.radius) ? Math.round(t.radius) + ' m' : '—',
@@ -1339,7 +1513,10 @@
       t.exitKj.toFixed(2) + ' kJ',
       t.exitKjTotal.toFixed(1) + ' kJ',
       tag(Charts.fmt2(t.ratioOut), t.ratioOut >= A.cfg.exposedAt ? 'warm' : t.ratioOut <= A.cfg.shelteredAt ? 'cool' : 'mid'),
-    ]);
+    ].concat(hasCad ? [
+      isFinite(t.cadence) ? Math.round(t.cadence) + ' rpm' : '—',
+      isFinite(t.coastFrac) ? Math.round(t.coastFrac * 100) + '%' : '—',
+    ] : []));
     $('turn-table').innerHTML = table(head, rows);
   }
 
@@ -1381,6 +1558,7 @@
     }
 
     Charts.compareBars($('cmp-bars'), rows, state.cmpMetric);
+    renderCircuitGroups(rows);
 
     if (!rows.length) {
       $('cmp-table').innerHTML =
@@ -1409,6 +1587,57 @@
       r.cda.toFixed(3),
     ]);
     $('cmp-table').innerHTML = table(head, body);
+  }
+
+  /**
+   * Races grouped by circuit.
+   *
+   * Comparing four different courses tells you which day was hardest.
+   * Comparing the *same* course across days tells you whether you are getting
+   * better at it — the corners, the sectors and the wind exposure are then
+   * genuinely like for like, and Turn 3 means the same thing in every row.
+   */
+  function renderCircuitGroups(rows) {
+    const el = $('cmp-circuits');
+    if (!el) return;
+    const withGps = rows.filter(r => r.circuit);
+    if (withGps.length < 2) { el.innerHTML = ''; return; }
+
+    const groups = Analyzer.groupByCircuit(withGps).filter(g => g.races.length > 1);
+    if (!groups.length) {
+      el.innerHTML = '<p class="card-note">No two of these were ridden on the same circuit, ' +
+        'so the comparison above is across different courses — useful for form, less so ' +
+        'for technique.</p>';
+      return;
+    }
+
+    let html = '';
+    for (const g of groups) {
+      const names = g.races.map(r => r.name).join(', ');
+      html += '<div class="card" style="margin-bottom:12px">' +
+        '<div class="card-head"><span class="card-title">Same circuit · ' +
+        g.races.length + ' races</span><span class="card-sub">' +
+        (g.fingerprint.lapLen / 1000).toFixed(2) + ' km lap</span></div>' +
+        '<p class="card-note" style="margin-top:0">' + Charts.esc(names) + '</p>';
+
+      // Per-turn, race by race — only meaningful because it is the same corner.
+      const maxTurns = Math.max(...g.races.map(r => (r.turns_ || []).length));
+      if (maxTurns) {
+        const head = ['Race'].concat(
+          Array.from({ length: maxTurns }, (_, k) => 'Turn ' + (k + 1)));
+        const body = g.races.map(r => [r.name].concat(
+          Array.from({ length: maxTurns }, (_, k) => {
+            const t = (r.turns_ || [])[k];
+            return t ? (t.lossV * 3.6).toFixed(1) + ' km/h' : '—';
+          })));
+        html += '<div class="table-scroll">' + table(head, body) + '</div>' +
+          '<p class="card-note">Speed scrubbed at each corner. The same corner on ' +
+          'different days: a column that keeps costing you more every time is a ' +
+          'line through that corner to work on, not a fitness problem.</p>';
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
   }
 
   function table(head, rows) {
