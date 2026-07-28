@@ -421,31 +421,46 @@ const Analyzer = (() => {
       };
     });
 
-    const sorted = lapInfo.map(l => l.speed).sort((a, b) => a - b);
-    const racePace = sorted[Math.floor(sorted.length * 0.75)];
+    const bySpeed = lapInfo.map(l => l.speed).sort((a, b) => a - b);
+    const byNp = lapInfo.map(l => l.np).sort((a, b) => a - b);
+    const racePace = bySpeed[Math.floor(bySpeed.length * 0.75)];
+    const raceNp = byNp[Math.floor(byNp.length * 0.75)];
     if (!(racePace > 0)) return none;
 
-    const tol = cfg.raceLapTolerance || 0.88;
-    const ok = lapInfo.map(l => l.speed >= racePace * tol);
+    /**
+     * Is this lap warm-up or cool-down rather than racing?
+     *
+     * The first version of this asked whether a lap was within 12% of race
+     * pace, and it was wrong in a way worth recording. Races fade: on one real
+     * crit the lap speeds ran 39, 41, 39, 42, 41, 40, 39, 40, 38, 35, 35, 35,
+     * 34, 35, 35, 34 km/h — a smooth decline with no discontinuity anywhere.
+     * A percentage-of-pace rule cut the last four off and called them a
+     * cool-down, one of them at 264 W, which was *higher* than three of the
+     * laps it kept. That is not a cool-down. That is the end of a hard race.
+     *
+     * What actually distinguishes a cool-down is that you stop pedalling hard.
+     * So the test is primarily on power: a cool-down lap is soft, somewhere
+     * near half your racing power, and no amount of fading gets you there while
+     * still racing. Speed is kept only as a backstop for a lap so slow that
+     * power cannot explain it.
+     */
+    // The two ends are not symmetric, because what sits at them is not the same
+    // thing. After the finish you soft-pedal. Before the start you roll out
+    // neutralised — slower than racing, but still in a bunch at real power, and
+    // still part of the race. So the front demands much clearer evidence before
+    // anything is removed.
+    const soft = frac => l => (l.np > 0 && l.np < raceNp * frac);
+    const crawl = frac => l => l.speed < racePace * frac;
 
-    let bestA = -1, bestB = -1, a = -1;
-    for (let k = 0; k <= ok.length; k++) {
-      if (k < ok.length && ok[k]) { if (a < 0) a = k; continue; }
-      if (a >= 0) {
-        if (bestA < 0 || k - a > bestB - bestA + 1) { bestA = a; bestB = k - 1; }
-        a = -1;
-      }
-    }
-    if (bestA < 0 || bestB - bestA + 1 < 3) return none;
+    const isCooldown = l => soft(cfg.cooldownNpFrac || 0.65)(l) || crawl(cfg.cooldownPaceFrac || 0.62)(l);
+    const isWarmup = l => soft(cfg.warmupNpFrac || 0.45)(l) || crawl(cfg.warmupPaceFrac || 0.55)(l);
 
-    // A first lap from a standing start is legitimately slower than the laps
-    // that follow — the field is rolling out, not racing yet, but it is still
-    // the race. On an already-trimmed file that lap is the *only* thing at the
-    // front, and trimming it would silently delete the start. So leading laps
-    // are held to a much looser bar than the rest: obviously slow, not merely
-    // slower.
-    const frontTol = cfg.rollOutTolerance || 0.78;
-    while (bestA > 0 && lapInfo[bestA - 1].speed >= racePace * frontTol) bestA--;
+    // Trim only from the ends. Anything in the middle is the race, however
+    // slow it got — a race that fades is still a race.
+    let bestA = 0, bestB = lapInfo.length - 1;
+    while (bestA < bestB && isWarmup(lapInfo[bestA])) bestA++;
+    while (bestB > bestA && isCooldown(lapInfo[bestB])) bestB--;
+    if (bestB - bestA + 1 < 3) return none;
 
     // "I always start recording on the start line" — a fact about how you ride
     // that no amount of signal processing can discover, and which removes the
@@ -519,7 +534,7 @@ const Analyzer = (() => {
       lapInfo,
       phases,
       onCircuit,
-      racePace,
+      racePace, raceNp,
       anchoredToStartLine: laps[0].source === 'manual',
       startedOnLine,
       endedAtStop,

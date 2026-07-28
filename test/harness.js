@@ -1024,6 +1024,66 @@ section('Race window and cropping');
   check('nudging out is bounded by the laps that exist',
     wider.raceLaps <= w.totalLaps, wider.raceLaps + ' of ' + w.totalLaps);
 
+  // A race that fades must not have its slow end mistaken for a cool-down.
+  // Real data: lap speeds ran 39, 41, 39, 42, 41, 40, 39, 40, 38, 35, 35, 35,
+  // 34, 35, 35, 34 km/h — a smooth decline, no discontinuity. A
+  // percentage-of-pace rule cut the last four off as cool-down, one of them at
+  // 264 W, higher than three laps it kept. What distinguishes a cool-down is
+  // that you stop pedalling hard, so the test is on power.
+  {
+    const rows = [39.3, 41.0, 38.7, 42.1, 40.7, 39.6, 38.8, 40.0,
+      37.6, 35.3, 35.5, 35.3, 34.3, 34.9, 35.0, 33.9];
+    const nps = [258, 257, 197, 342, 226, 205, 251, 242,
+      268, 222, 239, 232, 205, 224, 264, 205];
+    const fading = {
+      n: rows.length * 130,
+      t: [], v: [], watts: [], dist: [], alt: [], lat: [], lon: [],
+      name: 'fading race', source: 'test', startTime: null, lapTimes: [],
+    };
+    let d = 0, t = 0;
+    const R = 1073 / (2 * Math.PI);
+    for (let L = 0; L < rows.length; L++) {
+      const speed = rows[L] / 3.6;
+      const secs = Math.round(1073 / speed);
+      for (let k = 0; k < secs; k++) {
+        const s = (k / secs) * 2 * Math.PI;
+        fading.t.push(t++); fading.v.push(speed);
+        fading.watts.push(nps[L]);
+        d += speed; fading.dist.push(d); fading.alt.push(40);
+        fading.lat.push(42.5 + (R * Math.cos(s)) / 111320);
+        fading.lon.push(-71.6 + (R * Math.sin(s)) / (111320 * Math.cos(42.5 * Math.PI / 180)));
+      }
+    }
+    fading.n = fading.t.length;
+    const Pf = RideStore.prepare(fading, { movingSpeed: 2.5 });
+    const wf = Analyzer.detectRaceWindow(Pf, RideStore.configFor(Pf, {}));
+    check('a race that fades is not mistaken for a race plus a cool-down',
+      !wf.found || wf.raceLaps === wf.totalLaps,
+      wf.found ? 'kept ' + wf.raceLaps + ' of ' + wf.totalLaps + ' laps'
+        : 'no window (all laps are the race)');
+
+    // Now give the same race a genuine soft cool-down lap and check it is found.
+    const soft = JSON.parse(JSON.stringify(fading));
+    const speed = 5.0;
+    for (let k = 0; k < Math.round(1073 / speed); k++) {
+      const s = (k / (1073 / speed)) * 2 * Math.PI;
+      soft.t.push(t++); soft.v.push(speed); soft.watts.push(95);
+      d += speed; soft.dist.push(d); soft.alt.push(40);
+      soft.lat.push(42.5 + (R * Math.cos(s)) / 111320);
+      soft.lon.push(-71.6 + (R * Math.sin(s)) / (111320 * Math.cos(42.5 * Math.PI / 180)));
+    }
+    soft.n = soft.t.length;
+    const Ps2 = RideStore.prepare(soft, { movingSpeed: 2.5 });
+    const ws = Analyzer.detectRaceWindow(Ps2, RideStore.configFor(Ps2, {}));
+    check('a genuinely soft cool-down lap is still removed',
+      ws.found && (ws.totalLaps - 1 - ws.lastRaceLap >= 1 || ws.cooldownSeconds > 60),
+      ws.found ? 'dropped ' + (ws.totalLaps - 1 - ws.lastRaceLap) + ' lap(s), ' +
+        ws.cooldownSeconds.toFixed(0) + ' s of cool-down' : 'no window');
+    check('and only one lap goes, not several',
+      !ws.found || ws.totalLaps - 1 - ws.lastRaceLap <= 1,
+      'dropped ' + (ws.totalLaps - 1 - ws.lastRaceLap));
+  }
+
   check('the basis for the decision is reported',
     typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
 
