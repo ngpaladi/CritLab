@@ -421,6 +421,67 @@ const Analyzer = (() => {
       };
     });
 
+    /**
+     * Where the racing line is, and how far each lap strays from it.
+     *
+     * A rider who has finished often stops riding the course: peels into the
+     * pits, cuts across, drifts wide, or leaves for the car park. When that
+     * happens it is far better evidence than power — you cannot soft-pedal your
+     * way onto a different road — so it is checked first.
+     *
+     * The line has to come from the *fast* laps only. Building it from every
+     * lap would fold the cool-down into the reference and hide the very
+     * deviation being looked for.
+     */
+    const fastIdx = lapInfo
+      .map((l, k) => [l.speed, k])
+      .sort((a, b) => b[0] - a[0])
+      .slice(0, Math.max(3, Math.ceil(lapInfo.length * 0.5)))
+      .map(x => x[1])
+      .sort((a, b) => a - b);
+    const line = buildMeanLap(P, fastIdx.map(k => laps[k]));
+
+    if (line) {
+      const mLat = 111320, mLon = 111320 * Math.cos(line.lat[0] * Math.PI / 180);
+      const stride = Math.max(1, Math.round(6 / line.step));
+      const lx = [], ly = [];
+      for (let j = 0; j < line.n; j += stride) { lx.push(line.x[j]); ly.push(line.y[j]); }
+      const lat0 = line.lat[0], lon0 = line.lon[0];
+      const corridor = cfg.raceLineCorridor || 25;
+      const corr2 = corridor * corridor;
+
+      const devOf = i => {
+        const x = (P.lon[i] - lon0) * mLon, y = (P.lat[i] - lat0) * mLat;
+        let best = Infinity;
+        for (let k = 0; k < lx.length; k++) {
+          const dx = x - lx[k], dy = y - ly[k];
+          const d2 = dx * dx + dy * dy;
+          if (d2 < best) best = d2;
+        }
+        return best;
+      };
+
+      for (const l of lapInfo) {
+        let off = 0, tot = 0, sum = 0;
+        for (let i = l.i0; i <= l.i1; i++) {
+          if (!P.moving[i] || (!P.lat[i] && !P.lon[i])) continue;
+          const d2 = devOf(i);
+          tot++;
+          sum += Math.sqrt(d2);
+          if (d2 > corr2) off++;
+        }
+        l.offLine = tot ? off / tot : 0;
+        l.meanDev = tot ? sum / tot : 0;
+      }
+      // How far a *racing* lap typically strays, as the yardstick for "strayed".
+      const raceDevs = fastIdx.map(k => lapInfo[k].meanDev).filter(isFinite).sort((a, b) => a - b);
+      const typicalDev = raceDevs.length ? raceDevs[raceDevs.length >> 1] : 0;
+      for (const l of lapInfo) {
+        l.leftCourse = l.offLine > (cfg.offLineFrac || 0.2) ||
+          (typicalDev > 0.5 && l.meanDev > typicalDev * (cfg.devMultiple || 4));
+      }
+    }
+
     const bySpeed = lapInfo.map(l => l.speed).sort((a, b) => a - b);
     const byNp = lapInfo.map(l => l.np).sort((a, b) => a - b);
     const racePace = bySpeed[Math.floor(bySpeed.length * 0.75)];
@@ -452,8 +513,11 @@ const Analyzer = (() => {
     const soft = frac => l => (l.np > 0 && l.np < raceNp * frac);
     const crawl = frac => l => l.speed < racePace * frac;
 
-    const isCooldown = l => soft(cfg.cooldownNpFrac || 0.65)(l) || crawl(cfg.cooldownPaceFrac || 0.62)(l);
-    const isWarmup = l => soft(cfg.warmupNpFrac || 0.45)(l) || crawl(cfg.warmupPaceFrac || 0.55)(l);
+    // Leaving the course is decisive on its own; power decides the rest.
+    const isCooldown = l => l.leftCourse ||
+      soft(cfg.cooldownNpFrac || 0.65)(l) || crawl(cfg.cooldownPaceFrac || 0.62)(l);
+    const isWarmup = l => l.leftCourse ||
+      soft(cfg.warmupNpFrac || 0.45)(l) || crawl(cfg.warmupPaceFrac || 0.55)(l);
 
     // Trim only from the ends. Anything in the middle is the race, however
     // slow it got — a race that fades is still a race.
@@ -562,6 +626,10 @@ const Analyzer = (() => {
       // Nothing worth removing at either end: the file is already just the race.
       preCropped: (bestB - bestA + 1) === lapInfo.length &&
         approach + warmup + cooldown + home < 60,
+      // Which signal actually did the work, so the UI can say.
+      trimmedByCourse: lapInfo.some((l, k) =>
+        l.leftCourse && (k < bestA || k > bestB)),
+      anyLeftCourse: lapInfo.some(l => l.leftCourse),
       keptTrailingFragment: i1 > laps[bestB].i1,
       keptLeadingFragment: forcedStart == null && i0 < laps[bestA].i0,
       firstRaceLap: bestA,

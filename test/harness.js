@@ -1126,6 +1126,83 @@ section('Race window and cropping');
       (tiny.P.t[tiny.P.n - 1] - tiny.P.t[tiny.w.i1]).toFixed(0) + ' s');
   }
 
+  // Leaving the racing line — "peeling off" — is decisive evidence a lap was
+  // not raced, and it is the one signal power cannot supply: you can peel into
+  // the pits at 300 W and no amount of looking at watts will notice.
+  {
+    const LAP = 1073;
+    const append = (laps, speed, watts, excursionDeg) => {
+      const b = Demo.build();
+      const ref = [];
+      const d0 = b.dist[0];
+      for (let i = 0; i < b.dist.length && b.dist[i] - d0 <= LAP; i++) {
+        ref.push([b.lat[i], b.lon[i], b.dist[i] - d0]);
+      }
+      const at = m => {
+        const x = ((m % LAP) + LAP) % LAP;
+        let k = 0; while (k < ref.length - 2 && ref[k + 1][2] < x) k++;
+        const a = ref[k], c2 = ref[Math.min(ref.length - 1, k + 1)];
+        const span = c2[2] - a[2] || 1, f = (x - a[2]) / span;
+        return [a[0] + (c2[0] - a[0]) * f, a[1] + (c2[1] - a[1]) * f];
+      };
+      const secs = Math.round((laps * LAP) / speed);
+      const lastT = b.t[b.t.length - 1], lastD = b.dist[b.dist.length - 1];
+      const c = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+      for (let k = 0; k < secs; k++) {
+        const m = (k + 1) * speed;
+        const [la, lo] = at(m);
+        const f = (m % LAP) / LAP;
+        const off = excursionDeg && f > 0.3 && f < 0.7
+          ? excursionDeg * Math.sin(((f - 0.3) / 0.4) * Math.PI) : 0;
+        c.t.push(lastT + 1 + k); c.lat.push(la + off); c.lon.push(lo + off);
+        c.alt.push(b.alt[0]); c.v.push(speed); c.watts.push(watts);
+        c.dist.push(lastD + m);
+      }
+      const o = { ...b,
+        t: b.t.concat(c.t), lat: b.lat.concat(c.lat), lon: b.lon.concat(c.lon),
+        alt: b.alt.concat(c.alt), v: b.v.concat(c.v),
+        watts: b.watts.concat(c.watts), dist: b.dist.concat(c.dist) };
+      o.n = o.t.length;
+      const Pw = RideStore.prepare(o, { movingSpeed: 2.5 });
+      return { P: Pw, w: Analyzer.detectRaceWindow(Pw, RideStore.configFor(Pw, {})) };
+    };
+
+    const onLineHard = append(2, 10, 300, 0);
+    check('extra laps on the racing line at racing power are kept',
+      onLineHard.w.raceLaps === onLineHard.w.totalLaps,
+      'kept ' + onLineHard.w.raceLaps + ' of ' + onLineHard.w.totalLaps);
+
+    const onLineSoft = append(2, 5, 95, 0);
+    check('extra laps on the line but soft are dropped on power',
+      onLineSoft.w.raceLaps < onLineSoft.w.totalLaps && !onLineSoft.w.trimmedByCourse,
+      'kept ' + onLineSoft.w.raceLaps + ' of ' + onLineSoft.w.totalLaps +
+      ', byCourse=' + onLineSoft.w.trimmedByCourse);
+
+    // The case that motivates the whole signal.
+    const peeledHard = append(2, 10, 300, 0.0018);
+    check('laps that peel off the course are dropped even at racing power',
+      peeledHard.w.trimmedByCourse &&
+      peeledHard.w.raceLaps < peeledHard.w.totalLaps,
+      'kept ' + peeledHard.w.raceLaps + ' of ' + peeledHard.w.totalLaps +
+      ', byCourse=' + peeledHard.w.trimmedByCourse);
+    check('and the deviation is what flagged them',
+      peeledHard.w.lapInfo[peeledHard.w.lapInfo.length - 1].leftCourse === true &&
+      peeledHard.w.lapInfo[peeledHard.w.lapInfo.length - 1].offLine > 0.2,
+      (100 * peeledHard.w.lapInfo[peeledHard.w.lapInfo.length - 1].offLine).toFixed(0) +
+      '% off the line, mean deviation ' +
+      peeledHard.w.lapInfo[peeledHard.w.lapInfo.length - 1].meanDev.toFixed(0) + ' m');
+
+    const peeledSoft = append(2, 5, 95, 0.0018);
+    check('peeling off soft is caught too',
+      peeledSoft.w.raceLaps < peeledSoft.w.totalLaps);
+
+    // Race laps themselves must never be flagged: the line is built from the
+    // fast laps, so they define the corridor rather than straying from it.
+    check('racing laps are never flagged as off-course',
+      peeledHard.w.lapInfo.slice(0, -2).every(l => !l.leftCourse),
+      peeledHard.w.lapInfo.slice(0, -2).filter(l => l.leftCourse).length + ' false positives');
+  }
+
   check('the basis for the decision is reported',
     typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
 
