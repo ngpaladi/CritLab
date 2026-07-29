@@ -199,7 +199,10 @@
       // nagging about a trim that would remove nothing or staying silent and
       // leaving it unclear whether anything was checked.
       const spare = w.warmupSeconds + w.cooldownSeconds + w.approachSeconds + w.homeSeconds;
-      if (w.preCropped || spare <= 60) { entry.alreadyTrimmed = true; return; }
+      if (w.preCropped || spare <= (w.minWorthTrimming || 60)) {
+        entry.alreadyTrimmed = true;
+        return;
+      }
 
       // Dropping the cool-down without asking, when that has been asked for.
       // Only ever the tail: trimming the front unprompted could silently remove
@@ -280,7 +283,12 @@
         const w = entry.raceWindow;
         el.innerHTML = '<p class="hint" style="margin-bottom:12px">' +
           'This file is already just the race — ' + w.raceLaps +
-          ' laps, nothing worth trimming at either end.</p>';
+          ' laps, nothing worth trimming at either end' +
+          (w.looksPreTrimmed
+            ? '. It also looks trimmed before it got here: only ' +
+              Math.round(w.stoppedSeconds) + ' s of stopped time in ' +
+              Charts.fmtClock(entry.P.t[entry.P.n - 1]) + ', and moving from the off'
+            : '') + '.</p>';
       } else {
         el.innerHTML = '';
       }

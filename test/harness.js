@@ -1203,6 +1203,54 @@ section('Race window and cropping');
       peeledHard.w.lapInfo.slice(0, -2).filter(l => l.leftCourse).length + ' false positives');
   }
 
+  // Files that were trimmed before they arrived. Riders crop in intervals.icu
+  // or start and stop on the line, and the tell is stopped time: a raw crit
+  // recording has the rider stationary on the grid, so a file with essentially
+  // none has already had its ends taken off. That inverts the prior — whatever
+  // survived the rider's own editing is more likely to be race they meant to
+  // keep — so the bar for removing anything else goes up.
+  {
+    // The heuristic keys on *stationary* time, so a file padded with slow
+    // riding rather than grid time reads as pre-trimmed. That is fine and
+    // deliberate: raising the bar only suppresses marginal trims, and this one
+    // has eleven minutes on the table.
+    const spare = w.warmupSeconds + w.cooldownSeconds + w.approachSeconds + w.homeSeconds;
+    check('a raised bar never suppresses a large, obvious trim',
+      spare > w.minWorthTrimming,
+      spare.toFixed(0) + ' s to remove against a ' + w.minWorthTrimming + ' s bar');
+
+    // Same ride with the stationary time and slow ends removed.
+    const tight = Demo.build();
+    const Pt = RideStore.prepare(tight, { movingSpeed: 2.5 });
+    const wt = Analyzer.detectRaceWindow(Pt, RideStore.configFor(Pt, {}));
+    check('a file that starts moving with no stopped time reads as pre-trimmed',
+      wt.looksPreTrimmed === true,
+      'stopped ' + Math.round(wt.stoppedSeconds) + ' s of ' +
+      Math.round(Pt.t[Pt.n - 1]) + ' s');
+    check('and the bar for further trimming is raised', wt.minWorthTrimming === 120,
+      wt.minWorthTrimming + ' s');
+
+    // Grid time is the signature of a raw file, and must flip it back.
+    const gridded = Demo.build();
+    const lead = 180;
+    const pre = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+    for (let k = 0; k < lead; k++) {
+      pre.t.push(k - lead); pre.lat.push(gridded.lat[0]); pre.lon.push(gridded.lon[0]);
+      pre.alt.push(gridded.alt[0]); pre.v.push(0); pre.watts.push(0); pre.dist.push(0);
+    }
+    const rawFile = { ...gridded,
+      t: pre.t.concat(gridded.t), lat: pre.lat.concat(gridded.lat),
+      lon: pre.lon.concat(gridded.lon), alt: pre.alt.concat(gridded.alt),
+      v: pre.v.concat(gridded.v), watts: pre.watts.concat(gridded.watts),
+      dist: pre.dist.concat(gridded.dist) };
+    rawFile.n = rawFile.t.length;
+    const Pg = RideStore.prepare(rawFile, { movingSpeed: 2.5 });
+    const wg = Analyzer.detectRaceWindow(Pg, RideStore.configFor(Pg, {}));
+    check('three minutes on the grid marks a file as raw',
+      wg.looksPreTrimmed === false && wg.minWorthTrimming === 60,
+      'stopped ' + Math.round(wg.stoppedSeconds) + ' s, bar ' + wg.minWorthTrimming + ' s');
+  }
+
   check('the basis for the decision is reported',
     typeof w.anchoredToStartLine === 'boolean' && /power/.test(w.basis), w.basis);
 

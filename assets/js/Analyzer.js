@@ -594,6 +594,26 @@ const Analyzer = (() => {
       return sec;
     };
 
+    /**
+     * Does this file look like it was trimmed before it got here?
+     *
+     * Riders crop in intervals.icu, or start and stop the head unit on the
+     * line. The tell is stopped time: a raw crit recording has the rider
+     * stationary on the grid before the start and rolling to a halt somewhere
+     * after, so a file with essentially no stopped time and movement from the
+     * first second has already had its ends taken off.
+     *
+     * It matters because it inverts the prior. In a raw file a slow patch at
+     * the end is probably a cool-down. In one already trimmed, whatever
+     * survived the rider's own editing is more likely to be race they meant to
+     * keep — so the bar for removing anything else goes up.
+     */
+    let stopped = 0, firstMove = 0;
+    for (let i = 0; i < P.n; i++) if (!P.moving[i]) stopped += P.dt;
+    while (firstMove < P.n && !P.moving[firstMove]) firstMove++;
+    const elapsed = P.t[P.n - 1] || 1;
+    const looksPreTrimmed = (stopped / elapsed) < 0.03 && P.t[firstMove] < 15;
+
     const approach = startedOnLine ? 0 : movingSecs(0, i0 - 1, false);
     const warmup = startedOnLine ? 0 : movingSecs(0, i0 - 1, true);
     const cooldown = movingSecs(i1 + 1, P.n - 1, true);
@@ -630,6 +650,11 @@ const Analyzer = (() => {
       trimmedByCourse: lapInfo.some((l, k) =>
         l.leftCourse && (k < bestA || k > bestB)),
       anyLeftCourse: lapInfo.some(l => l.leftCourse),
+      looksPreTrimmed,
+      stoppedSeconds: stopped,
+      // How much has to be on the table before a trim is worth proposing. A
+      // file the rider already edited gets the benefit of the doubt.
+      minWorthTrimming: looksPreTrimmed ? 120 : 60,
       keptTrailingFragment: i1 > laps[bestB].i1,
       keptLeadingFragment: forcedStart == null && i0 < laps[bestA].i0,
       firstRaceLap: bestA,
