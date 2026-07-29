@@ -1084,6 +1084,48 @@ section('Race window and cropping');
       'dropped ' + (ws.totalLaps - 1 - ws.lastRaceLap));
   }
 
+  // Partial laps. A race does not oblige you to stop on a lap boundary, so
+  // there is nearly always a fragment after the last crossing — and it must be
+  // judged on the same evidence a whole lap is, not discarded for being partial.
+  {
+    const tailOf = (frac, speed, watts) => {
+      const b = Demo.build();
+      const n = b.lat.length;
+      const lastT = b.t[b.t.length - 1], lastD = b.dist[b.dist.length - 1];
+      const secs = Math.round((frac * 1073) / speed);
+      const c = { t: [], lat: [], lon: [], alt: [], v: [], watts: [], dist: [] };
+      for (let k = 0; k < secs; k++) {
+        c.t.push(lastT + 1 + k); c.lat.push(b.lat[k % n]); c.lon.push(b.lon[k % n]);
+        c.alt.push(b.alt[k % n]); c.v.push(speed); c.watts.push(watts);
+        c.dist.push(lastD + (k + 1) * speed);
+      }
+      const o = {
+        ...b, t: b.t.concat(c.t), lat: b.lat.concat(c.lat), lon: b.lon.concat(c.lon),
+        alt: b.alt.concat(c.alt), v: b.v.concat(c.v), watts: b.watts.concat(c.watts),
+        dist: b.dist.concat(c.dist),
+      };
+      o.n = o.t.length;
+      const Pt = RideStore.prepare(o, { movingSpeed: 2.5 });
+      return { P: Pt, w: Analyzer.detectRaceWindow(Pt, RideStore.configFor(Pt, {})), secs };
+    };
+
+    const soft = tailOf(0.45, 4.7, 95);
+    check('a partial soft cool-down lap is excluded',
+      !soft.w.keptTrailingFragment &&
+      soft.P.t[soft.P.n - 1] - soft.P.t[soft.w.i1] > soft.secs * 0.8,
+      (soft.P.t[soft.P.n - 1] - soft.P.t[soft.w.i1]).toFixed(0) + ' s left out of ' + soft.secs + ' s');
+
+    const hard = tailOf(0.45, 11, 380);
+    check('a partial lap still ridden at racing power is kept',
+      hard.w.keptTrailingFragment && hard.w.i1 >= hard.P.n - 2,
+      'window ends at sample ' + hard.w.i1 + ' of ' + hard.P.n);
+
+    const tiny = tailOf(0.04, 4.7, 95);
+    check('a fragment too short to judge is simply left out',
+      !tiny.w.keptTrailingFragment,
+      (tiny.P.t[tiny.P.n - 1] - tiny.P.t[tiny.w.i1]).toFixed(0) + ' s');
+  }
+
   check('the basis for the decision is reported',
     typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
 

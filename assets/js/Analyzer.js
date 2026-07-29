@@ -482,8 +482,41 @@ const Analyzer = (() => {
 
     for (let k = bestA; k <= bestB; k++) lapInfo[k].inRace = true;
 
-    const i0 = forcedStart != null ? forcedStart : laps[bestA].i0;
-    const i1 = laps[bestB].i1;
+    /**
+     * The fragments either side of the outermost lap crossings.
+     *
+     * A race does not oblige you to stop on a lap boundary. Riders roll on past
+     * the line and stop wherever, so there is nearly always a partial lap at
+     * the end — and taking the window to the last crossing throws it away
+     * whatever it contains. On one real race that discarded 2:12 ridden at
+     * 278 W, which is above that race's own reference power. Partial or not,
+     * that is racing.
+     *
+     * So a fragment is judged the same way a lap is: on power. Soft means
+     * cool-down and goes; anything at racing power stays.
+     */
+    const fragmentIsRacing = (from, to, softFrac) => {
+      const w = [];
+      for (let i = Math.max(0, from); i <= Math.min(P.n - 1, to); i++) {
+        if (P.moving[i]) w.push(P.watts[i]);
+      }
+      if (w.length * P.dt < 20) return false;         // too short to matter
+      return Physics.normalizedPower(w, P.dt) >= raceNp * softFrac;
+    };
+
+    let i0 = forcedStart != null ? forcedStart : laps[bestA].i0;
+    let i1 = laps[bestB].i1;
+
+    // Keep a trailing fragment that is still being raced.
+    if (bestB === lapInfo.length - 1 &&
+        fragmentIsRacing(i1 + 1, P.n - 1, cfg.cooldownNpFrac || 0.65)) {
+      i1 = P.n - 1;
+    }
+    // And a leading one, held to the stricter roll-out bar.
+    if (forcedStart == null && bestA === 0 &&
+        fragmentIsRacing(0, i0 - 1, cfg.warmupNpFrac || 0.45)) {
+      i0 = 0;
+    }
 
     // ── Phases ──────────────────────────────────────────────────────────────
     // Before the first lap crossing the rider is either approaching the venue
@@ -529,6 +562,8 @@ const Analyzer = (() => {
       // Nothing worth removing at either end: the file is already just the race.
       preCropped: (bestB - bestA + 1) === lapInfo.length &&
         approach + warmup + cooldown + home < 60,
+      keptTrailingFragment: i1 > laps[bestB].i1,
+      keptLeadingFragment: forcedStart == null && i0 < laps[bestA].i0,
       firstRaceLap: bestA,
       lastRaceLap: bestB,
       lapInfo,
