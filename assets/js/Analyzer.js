@@ -646,7 +646,8 @@ const Analyzer = (() => {
       basis: [
         startedOnLine ? 'you start on the line' : null,
         laps[0].source === 'manual' ? 'your start/finish line' : 'circuit geometry',
-        'lap pace',
+        lapInfo.some(l => l.leftCourse) ? 'the racing line' : null,
+        'lap power',
         endedAtStop ? 'and the stop after the finish' : null,
       ].filter(Boolean).join(', '),
     };

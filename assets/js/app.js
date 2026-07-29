@@ -298,7 +298,10 @@
       '<div class="crop-prompt-title">This file contains more than the race</div>' +
       '<p>' + win.raceLaps + ' of ' + win.totalLaps + ' laps were ridden at race pace' +
       (parts.length ? ', with ' + parts.join(', ') : '') + '. Found from ' +
-      Charts.esc(win.basis) + '.</p>' +
+      Charts.esc(win.basis) +
+      (win.trimmedByCourse
+        ? '. Those laps left the racing line, which settles it whatever the power says.'
+        : '.') + '</p>' +
       '<div class="chart-wrap"><canvas class="chart" id="crop-chart"></canvas></div>' +
       '<div class="crop-nudge">' +
       '<span class="crop-nudge-label">Race laps</span>' +

@@ -1204,7 +1204,7 @@ section('Race window and cropping');
   }
 
   check('the basis for the decision is reported',
-    typeof w.anchoredToStartLine === 'boolean' && /pace/.test(w.basis), w.basis);
+    typeof w.anchoredToStartLine === 'boolean' && /power/.test(w.basis), w.basis);
 
   // "I start recording on the start line" is a fact about the rider, not the
   // file. When declared, nothing may be trimmed off the front.
