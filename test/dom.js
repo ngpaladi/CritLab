@@ -672,6 +672,83 @@ async function settle(ms = 250) {
       !$('race-list').querySelector('.ride-refresh'));
   }
 
+  // The refresh button, driven end to end with the network stubbed out.
+  {
+    const Demo = G('Demo');
+    const Intervals = G('Intervals');
+    const base = Demo.build();
+
+    // A race that looks like it came from intervals.icu, so the button appears.
+    const icuRide = { ...base, id: 'icu-test-1', source: 'icu', sourceId: 'i1',
+      name: 'Refresh fixture', startAnchor: null };
+    await window.CritLab.loadRaw(icuRide, { persist: false });
+    await settle(700);
+
+    const cur = () => window.CritLab.state.races.find(r => r.id === 'icu-test-1');
+    check('an intervals.icu race offers a refresh button',
+      !!$('race-list').querySelector('.ride-refresh'));
+
+    // Give it a placed start/finish line, which must survive the re-download.
+    const P0 = cur().P;
+    const anchorAt = Math.floor(P0.n * 0.4);
+    cur().raw.startAnchor = { lat: P0.lat[anchorAt], lon: P0.lon[anchorAt] };
+    window.CritLab.recompute();
+    await settle(500);
+    const anchoredSource = cur().A.lapBounds[0].source;
+
+    // Stub the download to return a *different* ride, so a stale analysis is
+    // detectable rather than coincidentally identical.
+    const shorter = { ...Demo.build(), id: 'icu-test-1', source: 'icu', sourceId: 'i1',
+      name: 'Refresh fixture' };
+    const cut = Math.floor(shorter.t.length * 0.7);
+    for (const k of ['t', 'lat', 'lon', 'alt', 'v', 'watts', 'dist']) {
+      if (Array.isArray(shorter[k])) shorter[k] = shorter[k].slice(0, cut);
+    }
+    shorter.n = shorter.t.length;
+    const realLoad = Intervals.loadRide;
+    Intervals.loadRide = async () => JSON.parse(JSON.stringify(shorter));
+    G('Settings').set({ icuKey: 'stub-key' });
+
+    const beforeN = cur().P.n;
+    const beforeLaps = cur().A.summary.laps;
+    $('race-list').querySelector('.ride-refresh').dispatchEvent(new window.Event('click'));
+    for (let i = 0; i < 40 && cur().P.n === beforeN; i++) await settle(100);
+    await settle(700);
+
+    check('refreshing replaces the ride data', cur().P.n !== beforeN,
+      cur().P.n + ' samples, was ' + beforeN);
+    check('and re-analyses rather than leaving the old result',
+      !!cur().A && cur().A.summary.laps !== beforeLaps,
+      cur().A ? cur().A.summary.laps + ' laps, was ' + beforeLaps : 'no analysis');
+    check('the placed start/finish line survives the refresh',
+      !!cur().raw.startAnchor && cur().A.lapBounds[0].source === anchoredSource,
+      'anchor ' + (cur().raw.startAnchor ? 'kept' : 'LOST') +
+      ', lap source ' + cur().A.lapBounds[0].source);
+    check('crop state is re-evaluated, not carried over',
+      cur().cropChecked === true, 'cropChecked=' + cur().cropChecked);
+
+    Intervals.loadRide = realLoad;
+    G('Settings').set({ icuKey: '' });
+
+    // Clean up.
+    const extra = cur();
+    if (extra) {
+      window.CritLab.state.races = window.CritLab.state.races.filter(r => r !== extra);
+      await window.CritLab.select(window.CritLab.state.races[0].id);
+      await settle(400);
+    }
+  }
+
+  // The weather refresh must also re-run the analysis, not just refetch.
+  {
+    const before = window.CritLab.state.races[0].A;
+    $('wx-refresh').dispatchEvent(new window.Event('click'));
+    await settle(900);
+    check('the weather refresh produces a fresh analysis',
+      window.CritLab.state.races[0].A && window.CritLab.state.races[0].A !== before,
+      'analysis object replaced');
+  }
+
   {
     // Searching intervals.icu without a key must say so rather than fail.
     $('icu-fetch').dispatchEvent(new window.Event('click'));

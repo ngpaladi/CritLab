@@ -876,17 +876,33 @@
     try {
       const fresh = await Intervals.loadRide(entry.raw.sourceId, key);
       fresh.id = entry.id;                       // keep its place in the list
+
+      // A start/finish line the rider placed is a fact about the course, not
+      // about this copy of the file, so it survives a re-download. The crop is
+      // the opposite: the whole reason to refresh is that the file may have
+      // changed, which can invalidate the times a crop was expressed in.
+      if (entry.raw.startAnchor) fresh.startAnchor = entry.raw.startAnchor;
+
       entry.raw = fresh;
+      entry.cropChecked = false;
+      entry.cropWindow = null;
+      entry.autoTrimmed = null;
+      entry.alreadyTrimmed = false;
       entry.P = RideStore.prepare(fresh, { movingSpeed: 2.5 });
+      detectCrop(entry);                         // may re-apply an automatic trim
       entry.A = null;
       entry.wx = null; entry.wxError = null;     // conditions may have moved too
       entry.osm = null; entry.osmError = null;
       Weather.clearCache();
-      try { await RideStore.put(fresh); } catch (_) {}
-      renderRaceList();
+      try { await RideStore.put(entry.raw); } catch (_) {}
+
+      // Re-analyse now if this is what is on screen; otherwise the null A above
+      // makes it happen the moment it is shown or compared.
       if (state.currentId === entry.id) {
         await Promise.all([ensureWeather(entry), ensureOsm(entry)]);
         recompute();
+      } else {
+        renderRaceList();
       }
     } catch (err) {
       alert('Could not refresh: ' + (err.message || err));

@@ -48,16 +48,34 @@ const Settings = (() => {
 
   let cache = null;
 
+  // Last resort for the key when storage is unavailable — a file:// page, an
+  // opaque origin, private browsing with storage blocked. Everything else
+  // survives such a context through the settings cache, but the key is
+  // deliberately kept out of that cache, so without this it can be saved and
+  // then never read back: you paste a key, it appears to take, and every
+  // request afterwards says there is no key. Session-lifetime only, which is
+  // strictly less persistent than the storage it stands in for.
+  let memKey = '';
+
   function store(kind) {
-    try { return kind === 'session' ? sessionStorage : localStorage; } catch (_) { return null; }
+    try {
+      const s = kind === 'session' ? sessionStorage : localStorage;
+      if (!s) return null;
+      // Presence is not availability: some contexts throw only on use.
+      const probe = '__cl_probe__';
+      s.setItem(probe, '1');
+      s.removeItem(probe);
+      return s;
+    } catch (_) { return null; }
   }
 
   /** Read the key from wherever it was put. Session wins — it is the fresher one. */
   function getIcuKey() {
     try {
       const s = store('session'), l = store('local');
-      return (s && s.getItem(ICU_KEY_STORE)) || (l && l.getItem(ICU_KEY_STORE)) || '';
-    } catch (_) { return ''; }
+      const found = (s && s.getItem(ICU_KEY_STORE)) || (l && l.getItem(ICU_KEY_STORE)) || '';
+      return found || memKey;
+    } catch (_) { return memKey; }
   }
 
   /**
@@ -67,6 +85,7 @@ const Settings = (() => {
    */
   function setIcuKey(key, persist) {
     const how = persist || get('icuKeyPersist') || 'local';
+    memKey = key || '';
     // Always clear both first, so switching modes never leaves a stale copy
     // sitting in the store the user thinks they stopped using.
     try { const l = store('local'); if (l) l.removeItem(ICU_KEY_STORE); } catch (_) {}
