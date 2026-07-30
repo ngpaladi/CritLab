@@ -35,6 +35,8 @@ const Settings = (() => {
     mass: 78, crr: 0.004, cda: 0.32, lockCda: false,
     driveEff: 0.976, rotMass: 1.2, yawK: 0.15,
     ftp: 250, cp: 250, wPrime: 20000,
+    // Set when the rider moves the slider, so their value beats the file's.
+    ftpUserSet: false, cpUserSet: false, wPrimeUserSet: false,
 
     // model
     windSource: 'weather', windSpeed: 0, windDir: 0,
@@ -530,9 +532,25 @@ const RideStore = (() => {
    */
   function configFor(P, overrides) {
     const s = Settings.all();
-    const ftp = pickNum(overrides && overrides.ftp, P.ftp, s.ftp);
+    /**
+     * Where the fitness numbers come from, in order of authority.
+     *
+     * The file's own values are the right *default*: intervals.icu stamps each
+     * activity with the CP and W′ its power model held on that date, so a race
+     * from June is judged against June's fitness rather than today's.
+     *
+     * But they were also beating the rail sliders outright, which meant the
+     * panel showed 250 W while the model used 219 W and dragging it changed
+     * nothing. A control that silently does nothing is worse than no control,
+     * so an explicitly set value now wins, and the rail is synced to whatever
+     * is actually in force.
+     */
+    const fromFile = (key, fileValue) =>
+      (s[key + 'UserSet'] ? null : fileValue);
+
+    const ftp = pickNum(overrides && overrides.ftp, fromFile('ftp', P.ftp), s.ftp);
     const riderKg = pickNum(overrides && overrides.riderKg, P.weightKg, s.mass - 9);
-    const cp = pickNum(overrides && overrides.cp, P.cp, s.cp, ftp);
+    const cp = pickNum(overrides && overrides.cp, fromFile('cp', P.cp), s.cp, ftp);
 
     return {
       mass: pickNum(overrides && overrides.mass, s.mass),
@@ -544,7 +562,13 @@ const RideStore = (() => {
       yawK: pickNum(overrides && overrides.yawK, s.yawK),
 
       ftp, cp,
-      wPrime: pickNum(overrides && overrides.wPrime, P.wPrime, s.wPrime),
+      wPrime: pickNum(overrides && overrides.wPrime, fromFile('wPrime', P.wPrime), s.wPrime),
+      // Where each came from, so the rail can say.
+      fitnessSource: {
+        ftp: s.ftpUserSet ? 'you' : (P.ftp ? 'file' : 'default'),
+        cp: s.cpUserSet ? 'you' : (P.cp ? 'file' : 'default'),
+        wPrime: s.wPrimeUserSet ? 'you' : (P.wPrime ? 'file' : 'default'),
+      },
 
       startAnchor: (overrides && overrides.startAnchor) || null,
       startsOnStartLine: !!s.startsOnStartLine,

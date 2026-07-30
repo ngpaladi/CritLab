@@ -163,6 +163,7 @@ app: true
           <div class="card">
             <div class="card-head"><span class="card-title">Exposure by direction of travel</span></div>
             <div class="chart-wrap"><canvas class="chart" id="rose"></canvas></div>
+            <div class="legend" id="rose-legend"></div>
             <p class="card-note">
               Wedge length is time spent pointing that way; colour is the median draft
               ratio there. With a real crosswind one bearing should stand out.
@@ -199,6 +200,7 @@ app: true
             <span class="card-sub" id="lap-source"></span>
           </div>
           <div class="chart-wrap"><canvas class="chart" id="lap-bars"></canvas></div>
+          <div class="legend" id="lapbars-legend"></div>
         </div>
         <div class="card">
           <div class="card-head"><span class="card-title">Lap detail</span></div>
@@ -219,6 +221,7 @@ app: true
             </div>
           </div>
           <div class="chart-wrap"><canvas class="chart" id="turn-bars"></canvas></div>
+          <div class="legend" id="turnbars-legend"></div>
           <p class="card-note">
             Exit cost is the work above CP spent getting back to entry speed after the
             apex. Bars are coloured by the draft ratio on the exit: a red bar means you
@@ -263,10 +266,14 @@ app: true
             <span class="card-sub" id="rp-sub"></span>
           </div>
           <div class="card-grid">
-            <div class="chart-wrap"><canvas class="chart" id="rp-map"></canvas></div>
+            <div>
+              <div class="chart-wrap"><canvas class="chart" id="rp-map"></canvas></div>
+              <div class="legend" id="rpmap-legend"></div>
+            </div>
             <div>
               <div class="chart-wrap"><canvas class="chart" id="rp-strip"></canvas></div>
               <div class="chart-wrap" style="margin-top:6px"><canvas class="chart" id="rp-battery"></canvas></div>
+              <div class="legend" id="rp-legend"></div>
             </div>
           </div>
           <div class="replay-bar">
@@ -302,6 +309,7 @@ app: true
             </div>
           </div>
           <div class="chart-wrap"><canvas class="chart" id="cmp-bars"></canvas></div>
+          <div class="legend" id="cmpbars-legend"></div>
           <p class="card-note">
             Tick races in the sidebar to include them. Every race is re-analysed with the
             settings on the right, so the comparison is like for like.
@@ -378,21 +386,29 @@ app: true
 
       <div class="rail-section">
         <div class="sidebar-section-title">Fitness</div>
+        <p class="hint" style="margin-bottom:6px">
+          Defaults come from the activity itself, so a race in June is judged against
+          June's fitness. Move a slider and your value wins from then on.
+        </p>
         <div class="field">
-          <label for="in-ftp">FTP</label>
+          <label for="in-ftp">FTP <span class="src" id="src-ftp"></span></label>
           <span class="field-val" id="v-ftp">250 W</span>
           <input class="field-input" type="range" id="in-ftp" min="120" max="500" step="1" value="250">
         </div>
         <div class="field">
-          <label for="in-cp">Critical power</label>
+          <label for="in-cp">Critical power <span class="src" id="src-cp"></span></label>
           <span class="field-val" id="v-cp">250 W</span>
           <input class="field-input" type="range" id="in-cp" min="120" max="500" step="1" value="250">
         </div>
         <div class="field">
-          <label for="in-wPrime">W′ (anaerobic capacity)</label>
+          <label for="in-wPrime">W′ (anaerobic capacity) <span class="src" id="src-wPrime"></span></label>
           <span class="field-val" id="v-wPrime">20.0 kJ</span>
           <input class="field-input" type="range" id="in-wPrime" min="5000" max="45000" step="250" value="20000">
         </div>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn btn-sm" id="fitness-reset" style="display:none">Back to the activity's values</button>
+        </div>
+        <div id="wbal-sanity"></div>
       </div>
 
       <div class="rail-section">

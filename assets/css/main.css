@@ -781,3 +781,5 @@ table.data td.dim { color: var(--text-muted); }
   min-width: 116px;
   text-align: center;
 }
+
+.src { font-size: 10px; opacity: .65; font-style: italic; }

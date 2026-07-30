@@ -311,6 +311,12 @@
         ? '. Those laps left the racing line, which settles it whatever the power says.'
         : '.') + '</p>' +
       '<div class="chart-wrap"><canvas class="chart" id="crop-chart"></canvas></div>' +
+      '<div class="legend">' +
+      key(Charts.PHASE.race.color, 'the race') +
+      key(Charts.PHASE.warmup.color, 'warm-up or cool-down on the circuit') +
+      key(Charts.PHASE.approach.color, 'ride in or home, off the circuit') +
+      '<span class="legend-item">lower bars = each lap, height by pace; lit = kept</span>' +
+      '</div>' +
       '<div class="crop-nudge">' +
       '<span class="crop-nudge-label">Race laps</span>' +
       '<button class="btn btn-sm" data-nudge="start:-1" title="Include the lap before">＋ at the start</button>' +
@@ -424,7 +430,11 @@
       el.addEventListener('input', () => {
         const v = parseFloat(el.value);
         $('v-' + key).textContent = RAIL[key].fmt(v);
-        Settings.set({ [key]: v });
+        const patch = { [key]: v };
+        // Moving a fitness slider is a statement that you know better than the
+        // file, and it has to stick — otherwise the control does nothing.
+        if (key === 'ftp' || key === 'cp' || key === 'wPrime') patch[key + 'UserSet'] = true;
+        Settings.set(patch);
         recomputeSoon();
       });
     }
@@ -453,6 +463,11 @@
       Weather.clearCache();
       entry.wx = null; entry.wxError = null;
       await ensureWeather(entry, { force: true });
+      recompute();
+    });
+
+    $('fitness-reset').addEventListener('click', () => {
+      Settings.set({ ftpUserSet: false, cpUserSet: false, wPrimeUserSet: false });
       recompute();
     });
 
@@ -1085,10 +1100,54 @@
 
   function renderAll() {
     renderCropPrompt();
+    syncFitnessRail(current());
     renderConditions();
     renderStats();
     renderFindings();
     renderActivePanel();
+  }
+
+  /**
+   * Point the fitness sliders at the values actually being used. Without this
+   * the rail can sit on a number the model is ignoring, which is how a slider
+   * ends up looking broken.
+   */
+  function syncFitnessRail(entry) {
+    const A = entry && entry.A;
+    if (!A) return;
+    const src = A.cfg.fitnessSource || {};
+    const label = { file: 'from this activity', you: 'your value', default: 'default' };
+    for (const key of ['ftp', 'cp', 'wPrime']) {
+      const el = $('in-' + key);
+      if (!el) continue;
+      const v = A.cfg[key];
+      if (isFinite(v)) {
+        el.value = v;
+        $('v-' + key).textContent = RAIL[key].fmt(parseFloat(el.value));
+      }
+      const note = $('src-' + key);
+      if (note) note.textContent = label[src[key]] || '';
+    }
+    const anyOverridden = ['ftp', 'cp', 'wPrime'].some(k => src[k] === 'you');
+    const reset = $('fitness-reset');
+    if (reset) reset.style.display = anyOverridden ? '' : 'none';
+
+    // If CP cannot be right, say so where the sliders are, and offer the fix.
+    const box = $('wbal-sanity');
+    if (!box) return;
+    const f = A.fitness;
+    if (!f || f.ok) { box.innerHTML = ''; return; }
+    box.innerHTML =
+      '<div class="status status-' + (f.impossible ? 'err' : 'warn') + '" style="margin-top:10px">' +
+      Charts.esc(f.message) +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:6px">' +
+      '<button class="btn btn-sm" id="cp-fix">Set CP to ' + f.suggestedCp + ' W</button>' +
+      '</div>';
+    $('cp-fix').addEventListener('click', () => {
+      Settings.set({ cp: f.suggestedCp, cpUserSet: true });
+      recompute();
+    });
   }
 
   function renderConditions() {
@@ -1363,6 +1422,18 @@
       });
     }
 
+    // 6b. The model complaining that it has been given impossible numbers.
+    if (A.fitness && !A.fitness.ok) {
+      out.push({
+        kind: A.fitness.impossible ? 'critical' : 'warning',
+        title: A.fitness.impossible
+          ? 'Critical power is set below your race power'
+          : 'W′ spent most of the race at empty',
+        body: A.fitness.message + ' Suggested CP for this race: ' +
+          A.fitness.suggestedCp + ' W, which is your own normalised power for it.',
+      });
+    }
+
     // 7. What the heart rate says, as a measured counterweight to modelled W′.
     if (A.hr && isFinite(A.hr.decoupling)) {
       const d = A.hr.decoupling;
@@ -1444,13 +1515,20 @@
         $('reset-start').style.display = entry.raw.startAnchor ? '' : 'none';
         Charts.exposureRose($('rose'), A, { height: 260 });
         Charts.sectorHeatmap($('heatmap'), A);
-        $('map-legend').innerHTML = ratioLegend();
+        $('map-legend').innerHTML = ratioLegend() +
+          key(Charts.SERIES.solo.color, 'wind direction', 'line');
+        $('rose-legend').innerHTML =
+          '<span class="legend-item">wedge length = time spent on that bearing</span>' +
+          ratioLegend() + key(Charts.INK.text, 'wind, dashed', 'dash');
         $('heat-legend').innerHTML = heatLegend($('heatmap'));
         $('map-sub').textContent = mapSubtitle(entry);
         break;
 
       case 'laps':
         Charts.lapBars($('lap-bars'), A);
+        $('lapbars-legend').innerHTML =
+          key(Charts.DIVERGE.warm, 'share of the lap in clean air') +
+          '<span class="legend-item">bar length = percent of that lap above the clean-air threshold</span>';
         $('lap-source').textContent = A.summary.lapSource === 'device'
           ? 'from lap-button presses'
           : A.summary.lapSource === 'gps' ? 'detected from GPS' : 'no laps found';
@@ -1459,6 +1537,10 @@
 
       case 'corners':
         Charts.turnBars($('turn-bars'), A, state.turnMetric);
+        $('turnbars-legend').innerHTML =
+          '<span class="legend-item">bar length = ' + turnMetricLabel() + '</span>' +
+          ratioLegend() +
+          '<span class="legend-item">bar colour = draft ratio on the exit</span>';
         renderTurnTable(A);
         break;
 
@@ -1477,6 +1559,13 @@
 
       case 'replay':
         drawReplay();
+        $('rpmap-legend').innerHTML = ratioLegend() +
+          '<span class="legend-item">bright tail = the last 90 s · white ring = you now</span>';
+        $('rp-legend').innerHTML =
+          key(Charts.SERIES.watts.color, Charts.SERIES.watts.label, 'line') +
+          key(Charts.SERIES.solo.color, Charts.SERIES.solo.label, 'dash') +
+          key(Charts.SERIES.wbal.color, "W′ remaining, and its last 2 min", 'line') +
+          '<span class="legend-item">battery colour = how much is left</span>';
         break;
 
       case 'compare':
@@ -1536,6 +1625,25 @@
     }
     if (entry.osmError) return prefix + 'no basemap: ' + entry.osmError;
     return prefix;
+  }
+
+  function turnMetricLabel() {
+    return ({
+      exit: 'work above CP spent regaining entry speed, per lap',
+      loss: 'speed scrubbed between entry and apex',
+      apex: 'slowest speed through the corner',
+      recover: 'time taken to get back to entry speed',
+    })[state.turnMetric] || 'exit cost';
+  }
+
+  function cmpMetricLabel() {
+    return ({
+      exposed: 'share of the race in clean air',
+      finale: 'share of the finale in clean air',
+      matchKj: "W′ spent on matches",
+      cornerKj: "W′ spent on corner exits",
+      median: 'median draft ratio',
+    })[state.cmpMetric] || 'value';
   }
 
   function powerLegend() {
@@ -1673,6 +1781,11 @@
     }
 
     Charts.compareBars($('cmp-bars'), rows, state.cmpMetric);
+    $('cmpbars-legend').innerHTML =
+      '<span class="legend-item">bar length = ' + cmpMetricLabel() + '</span>' +
+      (state.cmpMetric === 'median'
+        ? ratioLegend()
+        : key(Charts.DIVERGE.warm, cmpMetricLabel()));
     renderCircuitGroups(rows);
 
     if (!rows.length) {

@@ -425,6 +425,26 @@ async function settle(ms = 250) {
 
   section('Compare');
 
+  // Every chart must label what its lines and colours mean.
+  {
+    const need = [
+      ['overview', 'ov-legend'], ['timeline', 'tl-legend'],
+      ['circuit', 'map-legend'], ['circuit', 'rose-legend'], ['circuit', 'heat-legend'],
+      ['laps', 'lapbars-legend'], ['corners', 'turnbars-legend'],
+      ['surges', 'wbal-legend'],
+      ['replay', 'rpmap-legend'], ['replay', 'rp-legend'],
+    ];
+    const bare = [];
+    for (const [tab, id] of need) {
+      clickTab(tab);
+      await settle(140);
+      const el = $(id);
+      if (!el || el.textContent.trim().length < 8) bare.push(id);
+    }
+    check('every chart panel carries a legend', bare.length === 0,
+      bare.length ? 'unlabelled: ' + bare.join(', ') : 'all ' + need.length + ' labelled');
+  }
+
   clickTab('compare'); await settle(120);
   check('compare is empty until races are ticked',
     /Tick/.test($('cmp-table').textContent), $('cmp-table').textContent.trim().slice(0, 50));
@@ -438,6 +458,8 @@ async function settle(ms = 250) {
     $('cmp-table').querySelectorAll('tbody tr').length + ' rows');
   check('compare table has no NaN', !/NaN|undefined/.test($('cmp-table').textContent));
   check('compare bars drew', drew($('cmp-bars')), calls($('cmp-bars')));
+  check('compare bars are labelled', $('cmpbars-legend').textContent.length > 8,
+    $('cmpbars-legend').textContent.slice(0, 60));
 
   for (const metric of ['finale', 'matchKj', 'cornerKj', 'exposed']) {
     const before = errors.length;
@@ -462,6 +484,28 @@ async function settle(ms = 250) {
     check('mass slider updates its readout', $('v-mass').textContent === '92.0 kg', $('v-mass').textContent);
     check('changing mass re-runs the analysis', $('stat-row').textContent !== before);
     check('mass persisted to settings', G('Settings').get('mass') === 92, String(G('Settings').get('mass')));
+  }
+
+  {
+    // A fitness slider that does nothing is worse than no slider. The file's
+    // own CP used to beat it outright.
+    const cpEl = $('in-cp');
+    const before = window.CritLab.state.races[0].A.cfg.cp;
+    cpEl.value = String(Math.round(before) + 40);
+    cpEl.dispatchEvent(new window.Event('input'));
+    await settle(1400);
+    const after = window.CritLab.state.races[0].A.cfg.cp;
+    check('moving the CP slider actually changes the model',
+      Math.abs(after - (before + 40)) < 1.5, before + ' W -> ' + after + ' W');
+    check('and the rail reports the value as yours',
+      /your value/.test($('src-cp').textContent), $('src-cp').textContent);
+    check('a way back to the activity value appears',
+      $('fitness-reset').style.display !== 'none');
+    $('fitness-reset').dispatchEvent(new window.Event('click'));
+    await settle(1400);
+    check('resetting returns to the activity value',
+      Math.abs(window.CritLab.state.races[0].A.cfg.cp - before) < 1.5,
+      window.CritLab.state.races[0].A.cfg.cp + ' W');
   }
 
   {

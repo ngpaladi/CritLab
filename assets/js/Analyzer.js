@@ -73,12 +73,13 @@ const Analyzer = (() => {
     const finale = summariseFinale(P, ratio, wbal, laps, surges, cfg);
     const hr = summariseHr(P, cfg, 0, P.n - 1);
     const shape = raceShape(lapRows);
+    const fitness = checkFitness(summary, wbal, cfg);
 
     return {
       cfg, rho, wind, cda: wind.cda,
       solo, soloRaw, wattsS, soloS, ratio, yaw, wbal,
       laps: lapRows, lapBounds: laps, meanLap, turns, sectors, surges,
-      headings, summary, finale, hr, shape,
+      headings, summary, finale, hr, shape, fitness,
       circuit: (P.lat && meanLap) ? (() => {
         let la = 0, lo = 0;
         for (let j = 0; j < meanLap.n; j++) { la += meanLap.lat[j]; lo += meanLap.lon[j]; }
@@ -1663,6 +1664,57 @@ const Analyzer = (() => {
   // ── The selection ─────────────────────────────────────────────────────────
 
   /**
+   * Is the configured critical power even possible for this race?
+   *
+   * CP is by definition a power you can hold more or less indefinitely, so if
+   * the whole race was ridden above it the number is wrong — and the W′ trace
+   * built on it is worthless, because the tank drains from the gun and pins at
+   * empty for the rest of the day. That produces the very specific failure of
+   * "0% W′ remaining" on every race regardless of how they went, which looks
+   * like the model working and is not.
+   *
+   * Normalised power for the whole race is the floor: you demonstrably held it.
+   */
+  function checkFitness(summary, wbal, cfg) {
+    const np = summary.np;
+    const cp = cfg.cp;
+    if (!(np > 0) || !(cp > 0)) return null;
+
+    const emptyFrac = summary.movingSeconds > 0
+      ? wbal.depletedSeconds / summary.movingSeconds : 0;
+
+    const impossible = np > cp;
+    // Pinned at empty for most of the race is the same complaint in softer form.
+    const pinned = emptyFrac > 0.5;
+
+    if (!impossible && !pinned) return { ok: true, emptyFrac, suggestedCp: null };
+
+    // A defensible floor: you held NP for the whole race, so CP is at least
+    // that. Round up a little to keep the tank off the floor.
+    const suggestedCp = Math.round(np * 1.02);
+
+    return {
+      ok: false,
+      impossible,
+      pinned,
+      emptyFrac,
+      np,
+      cp,
+      suggestedCp,
+      overdraftKj: wbal.overdraft / 1000,
+      message: impossible
+        ? 'Critical power is set to ' + Math.round(cp) + ' W but the race was ridden ' +
+          'at ' + Math.round(np) + ' W normalised — above CP for its whole length, ' +
+          'which is not something CP can mean. W′ drains from the gun and everything ' +
+          'built on it here is meaningless until this is fixed.'
+        : 'W′ sits at empty for ' + Math.round(emptyFrac * 100) + '% of the race. ' +
+          'Either the configured CP of ' + Math.round(cp) + ' W is too low or W′ of ' +
+          (cfg.wPrime / 1000).toFixed(1) + ' kJ is too small; as it stands the trace ' +
+          'has nothing left to say after the first few minutes.',
+    };
+  }
+
+  /**
    * The shape of the race, lap by lap.
    *
    * The first version of this looked for a changepoint — the lap where the pace
@@ -1843,7 +1895,7 @@ const Analyzer = (() => {
 
   return {
     run, resolveWind, detectLaps, lapsFromAnchor, anchorCandidates, nearestTrackIndex, detectTurns, buildSectors, detectSurges,
-    exposureByHeading, elevationClosure, detectRaceWindow, adjustRaceWindow, summariseHr, raceShape, circuitFingerprint, sameCircuit, groupByCircuit, compareRow, angleDelta, R_EARTH,
+    exposureByHeading, elevationClosure, detectRaceWindow, adjustRaceWindow, summariseHr, raceShape, checkFitness, circuitFingerprint, sameCircuit, groupByCircuit, compareRow, angleDelta, R_EARTH,
     buildMeanLap, fitCircle, classifyTurn, numberFromStart,
   };
 })();

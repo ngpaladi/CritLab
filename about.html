@@ -172,6 +172,25 @@ title: About
 <h2>Matches and W′</h2>
 
 <p>
+  <b>Where CP and W′ come from.</b> The defaults are the activity's own: when a
+  ride is pulled from intervals.icu it carries the critical power and W′ that
+  its power model held <em>on that date</em>, so a race in June is judged
+  against June's fitness rather than today's. Move a slider and your value wins
+  from then on; the rail says which is in force, and offers a way back.
+</p>
+
+<p>
+  Those defaults are worth checking, because a CP that is too low makes W′
+  worthless in a specific and misleading way. CP is by definition a power you
+  can hold more or less indefinitely, so if the whole race was ridden above it
+  the number is wrong — the tank drains from the gun and pins at empty, and
+  every race reports "0% W′ remaining" regardless of how it actually went. That
+  looks like the model working and is not. CritLab checks for it: normalised
+  power for the race is a floor CP cannot sit below, since you demonstrably held
+  it, and if CP is under that the panel says so and offers to fix it.
+</p>
+
+<p>
   W′ balance uses Skiba's differential model with Clarke's recovery expression:
   the anaerobic tank drains at (P − CP) above critical power and refills below it
   with a time constant set by how far below you are recovering. The reported
