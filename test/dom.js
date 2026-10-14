@@ -37,6 +37,7 @@ try {
   execFileSync('jekyll', ['build', '--destination', SITE], { cwd: ROOT, stdio: 'pipe' });
   check('site builds', fs.existsSync(path.join(SITE, 'index.html')));
   check('about page builds', fs.existsSync(path.join(SITE, 'about.html')));
+  check('connect page builds', fs.existsSync(path.join(SITE, 'connect.html')));
 } catch (err) {
   check('site builds', false, String(err.stderr || err.message).slice(0, 300));
   process.exit(1);
@@ -131,6 +132,23 @@ async function settle(ms = 250) {
   await new Promise(r => setTimeout(r, ms));
 }
 
+/** Boot another built page in its own jsdom, network off, errors collected. */
+async function bootPage(file) {
+  const errs = [];
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', e => errs.push(e.message));
+  vc.on('error', (...a) => errs.push(a.map(String).join(' ')));
+  const src = fs.readFileSync(path.join(SITE, file), 'utf8').replace(/(src|href)="\/CritLab\//g, '$1="');
+  const page = new JSDOM(src, {
+    runScripts: 'dangerously', resources: 'usable', virtualConsole: vc,
+    url: require('url').pathToFileURL(path.join(SITE, file)).href,
+    beforeParse(w) { w.fetch = () => Promise.reject(new Error('network disabled')); },
+  });
+  await new Promise(r => page.window.document.readyState === 'complete' ? r() : page.window.addEventListener('load', r));
+  await settle(100);
+  return { window: page.window, document: page.window.document, errors: errs };
+}
+
 (async () => {
   for (let i = 0; i < 40 && !window.CritLab; i++) await settle(100);
 
@@ -142,6 +160,35 @@ async function settle(ms = 250) {
 
   check('empty state shown before any race is loaded',
     /Load a/.test($('findings').textContent), $('findings').textContent.trim().slice(0, 60));
+
+  // ── Getting started ───────────────────────────────────────────────────────
+
+  section('Getting started');
+
+  {
+    const dlg = doc.querySelector('.tour-dialog');
+    check('welcome dialog shown when intervals.icu is not connected', !!dlg && /Welcome to CritLab/.test(dlg.textContent));
+    check('sidebar offers Connect instead of the ride browser',
+      $('icu-connect').style.display !== 'none' && $('icu-panel').style.display === 'none');
+    check('welcome links to the connect page', /connect\.html$/.test($('welcome-connect').getAttribute('href')));
+    $('welcome-later').dispatchEvent(new window.Event('click'));
+    const count = () => doc.querySelector('.tour-count').textContent;
+    check('Not now starts the walkthrough', !doc.querySelector('.tour-dialog') && /^1 of \d/.test(count()), count());
+    // jsdom lays everything out, so the phone-only step comes first here.
+    check('first step points at the phone nav', doc.querySelector('.mobile-nav').classList.contains('tour-target'));
+    $('tour-next').dispatchEvent(new window.Event('click'));
+    check('then the dropzone', $('dropzone').classList.contains('tour-target'));
+    $('tour-next').dispatchEvent(new window.Event('click'));
+    check('Next moves to the Connect button', /^3 of/.test(count()) && $('icu-connect').classList.contains('tour-target')
+      && !$('dropzone').classList.contains('tour-target'));
+    $('tour-back').dispatchEvent(new window.Event('click'));
+    check('Back goes back', /^2 of/.test(count()));
+    check('not marked done while running', !G('Settings').get('critTourDone'));
+    $('tour-skip').dispatchEvent(new window.Event('click'));
+    check('Skip closes it', !doc.querySelector('.tour-layer') && !doc.querySelector('.tour-target'));
+    check('skipping marks the tour done', G('Settings').get('critTourDone') === true);
+    check('CrossLab\'s tour flag is untouched', G('Settings').get('cxTourDone') === undefined);
+  }
 
   // ── Load the sample race ──────────────────────────────────────────────────
 
@@ -579,25 +626,56 @@ async function settle(ms = 250) {
     $('settings-btn').dispatchEvent(new window.Event('click'));
     await settle(60);
     check('drawer opens', $('settings-modal').style.display !== 'none');
-    check('API key field is a password field', $('icu-key').type === 'password');
+    check('drawer says not connected', /Not connected/.test($('icu-state').textContent));
+    check('drawer links to the connect page', /connect\.html$/.test($('icu-connect-link').getAttribute('href')));
     $('settings-close').dispatchEvent(new window.Event('click'));
     await settle(60);
     check('drawer closes', $('settings-modal').style.display === 'none');
   }
 
   {
-    // Saving a key with no network must surface an error, not hang or throw.
+    G('Settings').set({ icuKey: 'k', icuAthleteName: 'Test Rider' });
+    window.dispatchEvent(new window.CustomEvent('critlab:settings', { detail: { icu: true } }));
+    await settle(100);
+    check('with a key the sidebar shows the ride browser',
+      $('icu-panel').style.display !== 'none' && $('icu-connect').style.display === 'none' && /Test Rider/.test($('icu-who').textContent));
     $('settings-btn').dispatchEvent(new window.Event('click'));
     await settle(50);
-    $('icu-key').value = 'not-a-real-key';
-    $('icu-save').dispatchEvent(new window.Event('click'));
+    $('icu-clear').dispatchEvent(new window.Event('click'));
+    await settle(100);
+    check('Disconnect forgets the key and brings Connect back',
+      !G('Settings').get('icuKey') && $('icu-connect').style.display !== 'none' && /Not connected/.test($('icu-state').textContent));
+    $('settings-close').dispatchEvent(new window.Event('click'));
+  }
+
+  section('Connect page');
+
+  {
+    // Saving a key with no network must surface an error, not hang or throw.
+    const cn = await bootPage('connect.html');
+    const c$ = id => cn.document.getElementById(id);
+    const click = el => el.dispatchEvent(new cn.window.Event('click'));
+    check('connect page shows the steps when not connected', c$('cn-steps').style.display !== 'none' && c$('cn-back').style.display === 'none');
+    check('API key field is a password field', c$('cn-key').type === 'password');
+    check('step 1 opens intervals.icu settings', c$('cn-open').getAttribute('href') === 'https://intervals.icu/settings');
+    click(c$('cn-connect'));
+    check('connecting with no key asks for one', c$('cn-status').className.includes('status-err'));
+    c$('cn-key').value = 'not-a-real-key';
+    click(c$('cn-connect'));
     await settle(400);
     check('a failing key test reports an error to the user',
-      $('icu-status').className.includes('status-err'), $('icu-status').textContent.slice(0, 80));
-    $('icu-clear').dispatchEvent(new window.Event('click'));
+      c$('cn-status').className.includes('status-err'), c$('cn-status').textContent.slice(0, 80));
+    cn.window.eval("Intervals.testKey = async () => ({ id: 1, name: 'Test Rider', ftp: 250, weight: 70 })");
+    click(c$('cn-connect'));
     await settle(50);
-    check('forgetting the key clears it', !G('Settings').get('icuKey'));
-    $('settings-close').dispatchEvent(new window.Event('click'));
+    const S = cn.window.eval('Settings');
+    check('a good key is saved', S.get('icuKey') === 'not-a-real-key' && S.get('icuAthleteName') === 'Test Rider');
+    check('and the page says who is connected', /Test Rider/.test(c$('cn-connected').textContent)
+      && c$('cn-steps').style.display === 'none' && c$('cn-back').style.display !== 'none');
+    click(c$('cn-forget'));
+    check('forgetting the key clears it', !S.get('icuKey') && c$('cn-steps').style.display !== 'none');
+    check('connect page has no errors', cn.errors.length === 0, cn.errors.join(' | ').slice(0, 300));
+    cn.window.close();
   }
 
   {
@@ -754,7 +832,7 @@ async function settle(ms = 250) {
     $('icu-fetch').dispatchEvent(new window.Event('click'));
     await settle(200);
     check('searching with no key explains what to do',
-      /No API key/i.test($('icu-results').textContent), $('icu-results').textContent.slice(0, 70));
+      /Connect intervals.icu/i.test($('icu-results').textContent), $('icu-results').textContent.slice(0, 70));
   }
 
   // ── Mobile layout ─────────────────────────────────────────────────────────

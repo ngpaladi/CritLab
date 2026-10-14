@@ -22,12 +22,13 @@ app: true
     <div class="sidebar-section">
       <div class="sidebar-section-title">
         <span>intervals.icu</span>
-        <button class="btn btn-sm" id="icu-open-settings">Key</button>
+      </div>
+      <div id="icu-connect" style="display:none">
+        <a class="btn btn-primary icu-connect-cta" id="icu-connect-cta" href="{{ '/connect.html' | relative_url }}">Connect intervals.icu</a>
+        <p class="hint">Browse and load your races straight from your intervals.icu account.</p>
       </div>
       <div id="icu-panel">
-        <p class="hint" style="margin-bottom:8px">
-          Your key goes only to intervals.icu &mdash; CritLab has no server to send it to.
-        </p>
+        <p class="hint" style="margin-bottom:8px" id="icu-who"></p>
         <div class="field">
           <label for="icu-from">From</label>
           <label for="icu-to" style="text-align:right">To</label>

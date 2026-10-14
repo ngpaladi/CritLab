@@ -13,6 +13,7 @@
     <nav class="site-nav">
       <a href="{{ '/' | relative_url }}" {% if page.url == '/' %}class="active"{% endif %}>Analyze</a>
       <a href="{{ '/about.html' | relative_url }}" {% if page.url contains 'about' %}class="active"{% endif %}>About</a>
+      <a href="https://www.noahpaladino.com/CrossLab/" class="sibling" title="The cyclocross version">CrossLab ↗</a>
     </nav>
     <div class="header-spacer"></div>
     <button id="settings-btn" class="settings-btn" aria-label="Settings">
@@ -37,51 +38,22 @@
         <div class="settings-section">
           <div class="settings-section-title">intervals.icu</div>
 
-          <div class="privacy-callout">
-            <div class="privacy-callout-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              CritLab never receives your API key
-            </div>
-            <p>
-              There is no CritLab server. This is a static page: the only place your key
-              is ever sent is <b>intervals.icu itself</b>, directly from your browser,
-              in the request that fetches your rides. It is not transmitted anywhere
-              else, not to us, and not to any third party &mdash; there is nowhere for
-              it to go.
-            </p>
-            <p>
-              It is kept in this browser's storage so you don't have to paste it every
-              visit. You can make that last only until you close the tab, or remove it
-              entirely, below.
-            </p>
+          <p class="hint" id="icu-state">Not connected.</p>
+          <div class="btn-row" style="margin-top:8px">
+            <a class="btn btn-primary btn-sm" id="icu-connect-link" href="{{ '/connect.html' | relative_url }}">Connect intervals.icu</a>
+            <button class="btn btn-sm" id="icu-clear">Disconnect</button>
           </div>
-
-          <p class="hint">
-            Generate a key under <code>Settings &rarr; Developer</code> on
-            <a href="https://intervals.icu/settings" target="_blank" rel="noopener">intervals.icu</a>.
-            It only ever grants access to your own account, and you can revoke it there
-            at any time.
-          </p>
-
-          <div class="settings-row">
-            <label for="icu-key">API key</label>
-            <input type="password" id="icu-key" placeholder="paste API key" autocomplete="off" spellcheck="false">
-          </div>
-          <div class="settings-row">
-            <label for="icu-athlete">Athlete ID <span style="opacity:.7">(blank = the key's own athlete)</span></label>
-            <input type="text" id="icu-athlete" placeholder="0" autocomplete="off" spellcheck="false">
-          </div>
-          <div class="settings-row">
+          <div class="settings-row" style="margin-top:10px">
             <label for="icu-persist">Keep the key</label>
             <select id="icu-persist">
               <option value="local">In this browser, until I remove it</option>
               <option value="session">Only until I close this tab</option>
             </select>
           </div>
-          <div class="btn-row" style="margin-top:10px">
-            <button class="btn btn-primary btn-sm" id="icu-save">Save &amp; test</button>
-            <button class="btn btn-sm" id="icu-clear">Forget key</button>
-          </div>
+          <p class="hint">
+            The key goes only to intervals.icu, directly from your browser &mdash; there is
+            no CritLab server. It is shared with CrossLab.
+          </p>
           <div id="icu-status" class="status status-info" style="display:none"></div>
         </div>
 
@@ -145,6 +117,14 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-section-title">Getting started</div>
+          <p class="hint">A short tour of where things are.</p>
+          <div class="btn-row" style="margin-top:8px">
+            <a class="btn btn-sm" id="tour-replay" href="{{ '/' | relative_url }}?tour=1">Replay the walkthrough</a>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-section-title">Stored data</div>
           <p class="hint">Races are kept in this browser's IndexedDB. Nothing is uploaded anywhere.</p>
           <div class="btn-row" style="margin-top:10px">
@@ -166,6 +146,7 @@
   <script src="{{ '/assets/js/Analyzer.js' | relative_url }}"></script>
   <script src="{{ '/assets/js/Charts.js' | relative_url }}"></script>
   <script src="{{ '/assets/js/Demo.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/Tour.js' | relative_url }}"></script>
   <script src="{{ '/assets/js/app.js' | relative_url }}"></script>
   {% endif %}
 
@@ -175,8 +156,7 @@
     'use strict';
 
     var modal   = document.getElementById('settings-modal');
-    var keyEl   = document.getElementById('icu-key');
-    var athEl   = document.getElementById('icu-athlete');
+    var stateEl = document.getElementById('icu-state');
     var statusEl= document.getElementById('icu-status');
     var autoEl  = document.getElementById('wx-auto');
     var persistEl = document.getElementById('icu-persist');
@@ -188,10 +168,16 @@
       statusEl.style.display = '';
     }
 
+    function renderIcu() {
+      var on = !!Settings.getIcuKey(), name = Settings.get('icuAthleteName');
+      stateEl.textContent = on ? 'Connected' + (name ? ' as ' + name : '') + '.' : 'Not connected.';
+      document.getElementById('icu-connect-link').textContent = on ? 'Use a different key' : 'Connect intervals.icu';
+      document.getElementById('icu-clear').style.display = on ? '' : 'none';
+    }
+
     function open() {
       var s = Settings.all();
-      keyEl.value   = Settings.getIcuKey() || '';
-      athEl.value   = s.icuAthlete || '';
+      renderIcu();
       persistEl.value = s.icuKeyPersist || 'local';
       autoEl.checked = s.wxAuto !== false;
       roughEl.value  = String(s.wxRoughness || 0.1);
@@ -200,7 +186,6 @@
       document.getElementById('auto-trim-cooldown').checked = !!s.autoTrimCooldown;
       statusEl.style.display = 'none';
       modal.style.display = '';
-      keyEl.focus();
     }
     function close() { modal.style.display = 'none'; }
 
@@ -209,27 +194,6 @@
     document.getElementById('settings-overlay').addEventListener('click', close);
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && modal.style.display !== 'none') close();
-    });
-
-    document.getElementById('icu-save').addEventListener('click', async function () {
-      var key = keyEl.value.trim();
-      var ath = athEl.value.trim();
-      if (!key) { say('err', 'Paste an API key first.'); return; }
-      say('info', 'Contacting intervals.icu…');
-      try {
-        var athlete = await Intervals.testKey(key, ath || '0');
-        Settings.set({
-          icuKey: key, icuAthlete: ath, icuAthleteName: athlete.name || '',
-          icuKeyPersist: persistEl.value,
-        });
-        var bits = ['Connected as ' + (athlete.name || 'athlete ' + athlete.id)];
-        if (athlete.ftp)    bits.push('FTP ' + athlete.ftp + ' W');
-        if (athlete.weight) bits.push(athlete.weight.toFixed(1) + ' kg');
-        say('ok', bits.join(' · '));
-        window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { icu: true } }));
-      } catch (err) {
-        say('err', String(err.message || err));
-      }
     });
 
     persistEl.addEventListener('change', function () {
@@ -242,8 +206,8 @@
     document.getElementById('icu-clear').addEventListener('click', function () {
       Settings.forgetIcuKey();
       Settings.set({ icuAthlete: '', icuAthleteName: '' });
-      keyEl.value = ''; athEl.value = '';
-      say('ok', 'Key erased from this browser. Nothing to revoke elsewhere — it was never sent anywhere but intervals.icu.');
+      renderIcu();
+      say('ok', 'Disconnected — the key is erased from this browser.');
       window.dispatchEvent(new CustomEvent('critlab:settings', { detail: { icu: true } }));
     });
 

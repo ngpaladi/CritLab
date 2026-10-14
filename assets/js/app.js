@@ -60,11 +60,88 @@
     }
 
     renderRaceList();
+    renderIcuConnection();
     if (state.races.length) {
       await select(state.races[0].id);
     } else {
       renderEmpty();
     }
+    gettingStarted();
+  }
+
+  // ── Getting started ───────────────────────────────────────────────────────
+
+  function connectUrl() { return $('icu-connect-cta').getAttribute('href'); }
+
+  /** The sidebar shows a Connect button until there is a key, then the ride browser. */
+  function renderIcuConnection() {
+    const on = !!Settings.get('icuKey');
+    $('icu-connect').style.display = on ? 'none' : '';
+    $('icu-panel').style.display = on ? '' : 'none';
+    const name = Settings.get('icuAthleteName');
+    $('icu-who').innerHTML = on
+      ? 'Connected' + (name ? ' as ' + Charts.esc(name) : '') + ' · <a href="' + connectUrl() + '">change</a>'
+      : '';
+  }
+
+  /**
+   * First visit: a welcome dialog if intervals.icu isn't connected, then the
+   * walkthrough. Each is shown once (critWelcomeSeen, critTourDone — prefixed
+   * because the blob is shared with CrossLab, which has its own tour); ?tour=1
+   * from the settings drawer replays the walkthrough.
+   */
+  function gettingStarted() {
+    const replay = /[?&]tour=1\b/.test(location.search);
+    if (replay) history.replaceState(null, '', location.pathname);
+    if (!replay && Settings.get('critTourDone')) return;
+    if (!replay && !Settings.get('icuKey') && !Settings.get('critWelcomeSeen')) welcome();
+    else walkthrough();
+  }
+
+  function welcome() {
+    Settings.set({ critWelcomeSeen: true });
+    Tour.dialog({
+      title: 'Welcome to CritLab',
+      body:
+        '<p>CritLab works out where a criterium was won and lost: when you were in the draft, ' +
+        'what each corner and surge cost, and how much of your W&prime; was left for the finish.</p>' +
+        '<p>Connect intervals.icu to load races straight from your account. Or skip it: you ' +
+        'can drop in a .fit file, or try the sample race, without connecting anything.</p>',
+      actions: [
+        { label: 'Connect intervals.icu', primary: true, href: connectUrl(), id: 'welcome-connect' },
+        { label: 'Not now', id: 'welcome-later', onClick: walkthrough },
+      ],
+      onDismiss: () => Settings.set({ critTourDone: true }),
+    });
+  }
+
+  function walkthrough() {
+    const on = !!Settings.get('icuKey');
+    Tour.start([
+      // Only laid out on a phone, where the sidebar and rail are separate screens.
+      { el: '.mobile-nav', title: 'Three screens',
+        body: '<b>Races</b> is where you load one, from a file, intervals.icu or the sample. ' +
+              '<b>Analysis</b> is the race itself; <b>Setup</b> holds the rider numbers.' },
+      { el: '#dropzone', title: 'Load a race',
+        body: 'Drop a <b>.fit</b> file from your head unit here, or a .json exported from CritLab or CrossLab. ' +
+              'Races stay in this browser.' },
+      on
+        ? { el: '#icu-panel', title: 'Your intervals.icu rides',
+            body: 'Pick a date range and <b>Find rides</b>. Rides synced from Strava can\'t be read ' +
+                  'through the API; load those as .fit files.' }
+        : { el: '#icu-connect', title: 'intervals.icu',
+            body: 'Connect once and your races are a click away here. CrossLab shares the connection.' },
+      { el: '#demo-btn', title: 'Nothing to hand?',
+        body: 'The sample race shows every chart with realistic data, so you can find your way around first.' },
+      { el: '#tabbar', title: 'The analysis',
+        body: '<b>Overview</b> sums the race up. <b>Circuit</b> and <b>Corners</b> show the course lap by lap; ' +
+              '<b>Surges &amp; W&prime;</b> shows what each attack cost you.' },
+      { el: '.rail', title: 'Rider and conditions',
+        body: 'Mass, FTP, CP and W&prime; come from the activity where it has them. Change any of them here ' +
+              'and the analysis reruns.' },
+      { el: '#settings-btn', title: 'Settings',
+        body: 'Weather, map, how you record, and this tour again.' },
+    ], { onEnd: () => Settings.set({ critTourDone: true }) });
   }
 
   // ── Race lifecycle ────────────────────────────────────────────────────────
@@ -484,9 +561,8 @@
       recompute();
     });
 
-    $('icu-open-settings').addEventListener('click', () => $('settings-btn').click());
-
     window.addEventListener('critlab:settings', async e => {
+      if (e.detail && e.detail.icu) renderIcuConnection();
       if (e.detail && e.detail.cleared) {
         state.races = [];
         state.currentId = null;
@@ -657,7 +733,7 @@
     const key = Settings.get('icuKey');
     const out = $('icu-results');
     if (!key) {
-      out.innerHTML = '<div class="status status-warn">No API key saved. Press <b>Key</b> above to add one.</div>';
+      out.innerHTML = '<div class="status status-warn">Not connected. <a href="' + connectUrl() + '">Connect intervals.icu</a> first.</div>';
       return;
     }
     out.innerHTML = '<div class="status status-info">Searching…</div>';

@@ -32,6 +32,7 @@ Analyzer.js    laps, corners, sectors, surges, summary
 Charts.js      canvas rendering
 RideStore.js   normalisation, derived series, IndexedDB, Settings
 Demo.js        synthetic sample race
+Tour.js        welcome dialog + walkthrough       (shared with CrossLab)
 app.js         UI orchestration
 ```
 
@@ -175,6 +176,10 @@ else does.
 | `cl-settings` | localStorage | all preferences, including the API key |
 | `cl-wx-*` | localStorage | cached Open-Meteo bundles, 30-day TTL |
 | `critlab` / `rides` | IndexedDB | raw rides, keyed by `id` |
+
+The blob is shared with CrossLab (same origin). CritLab-only keys added since
+are prefixed `crit` (`critWelcomeSeen`, `critTourDone`); CrossLab's are `cx`.
+The API key is entered on `connect.html`, not in the drawer.
 
 Only the **raw** ride is stored. Derived series are recomputed by `prepare` on
 load, which is cheap and avoids stale-schema problems.

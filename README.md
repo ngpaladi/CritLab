@@ -17,7 +17,8 @@ No server, no account, no upload. Races live in your browser's IndexedDB.
 - **Real weather** — historical temperature, humidity, pressure, wind speed and
   direction for the race's location and hour, from Open-Meteo, interpolated per
   sample and corrected from the 10 m reference height down to rider height.
-- **intervals.icu** — browse and load rides directly with an API key. **CritLab
+- **intervals.icu** — browse and load rides directly. **Connect intervals.icu**
+  walks you through fetching a personal API key and pasting it once. **CritLab
   never receives your key.** There is no CritLab server: the only place it is
   ever sent is intervals.icu itself, straight from your browser. You choose
   whether it is remembered in this browser or dropped when the tab closes.
@@ -97,6 +98,7 @@ assets/js/
   Charts.js      — canvas charts with hover, OKLab diverging ramps
   RideStore.js   — normalisation to a 1 Hz grid, derived series, IndexedDB
   Demo.js        — the synthetic sample race
+  Tour.js        — welcome dialog and walkthrough (shared with CrossLab)
   app.js         — UI state, events, rendering
 index.html       — the analyser
 about.html       — what it computes, and what it assumes
@@ -153,7 +155,7 @@ by promise:
   no third party, no intermediary.
 - It is kept in its own storage entry — never inside the general settings blob —
   and you choose `localStorage` (remembered) or `sessionStorage` (gone when the
-  tab closes). **Forget key** erases both. Keys can also be revoked outright at
+  tab closes). **Disconnect** erases both. Keys can also be revoked outright at
   intervals.icu, which invalidates them everywhere.
 - **Your rides** live in this browser's IndexedDB and are never uploaded.
 - **Open-Meteo** is sent the rounded coordinates and date of a race; **Overpass**

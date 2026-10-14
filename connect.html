@@ -1,0 +1,172 @@
+---
+layout: default
+title: Connect intervals.icu
+---
+
+<div class="connect-wrap">
+
+  <h1>Connect intervals.icu</h1>
+  <p class="lead">
+    {{ site.title }} reads your rides straight from intervals.icu, using a personal
+    API key. Getting one takes about a minute.
+  </p>
+
+  <div id="cn-connected" class="status status-ok" style="display:none;margin-bottom:18px"></div>
+
+  <div id="cn-steps">
+    <div class="connect-step">
+      <div class="connect-step-n">1</div>
+      <div class="connect-step-body">
+        <div class="connect-step-title">Open your intervals.icu settings</div>
+        <p class="hint" style="margin-bottom:8px">
+          Sign in if it asks. Scroll to <b>Developer Settings</b> near the bottom of the
+          page, then view or generate your <b>API key</b>.
+        </p>
+        <a class="btn btn-sm" id="cn-open" href="https://intervals.icu/settings" target="_blank" rel="noopener">Open intervals.icu settings ↗</a>
+      </div>
+    </div>
+
+    <div class="connect-step">
+      <div class="connect-step-n">2</div>
+      <div class="connect-step-body">
+        <div class="connect-step-title">Copy the key and paste it here</div>
+        <input type="password" id="cn-key" placeholder="paste API key" autocomplete="off" spellcheck="false">
+        <details style="margin-top:8px">
+          <summary class="hint">More options</summary>
+          <div class="settings-row" style="margin-top:8px">
+            <label for="cn-athlete">Athlete ID <span style="opacity:.7">(blank = the key's own athlete)</span></label>
+            <input type="text" id="cn-athlete" placeholder="0" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label for="cn-persist">Keep the key</label>
+            <select id="cn-persist">
+              <option value="local">In this browser, until I remove it</option>
+              <option value="session">Only until I close this tab</option>
+            </select>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="connect-step">
+      <div class="connect-step-n">3</div>
+      <div class="connect-step-body">
+        <div class="connect-step-title">Connect</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="cn-connect">Connect intervals.icu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cn-status" class="status status-info" style="display:none"></div>
+
+  <div class="btn-row connect-done">
+    <a class="btn btn-primary" id="cn-back" href="{{ '/' | relative_url }}" style="display:none">Start analysing →</a>
+    <button class="btn" id="cn-change" style="display:none">Use a different key</button>
+    <button class="btn" id="cn-forget" style="display:none">Disconnect</button>
+    <a class="btn" id="cn-later" href="{{ '/' | relative_url }}">Back to {{ site.title }}</a>
+  </div>
+
+  <div class="privacy-callout" style="margin-top:28px">
+    <div class="privacy-callout-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      {{ site.title }} never receives your API key
+    </div>
+    <p>
+      There is no {{ site.title }} server. This is a static page: the only place your key
+      is ever sent is <b>intervals.icu itself</b>, directly from your browser, in the
+      request that fetches your rides. It is not transmitted anywhere else &mdash; there
+      is nowhere for it to go.
+    </p>
+    <p>
+      It is kept in this browser's storage, in the slot
+      <a href="https://www.noahpaladino.com/CritLab/">CritLab</a> and
+      <a href="https://www.noahpaladino.com/CrossLab/">CrossLab</a> share &mdash; connect
+      in either and both have it. The key only grants access to your own account, and
+      you can revoke it on intervals.icu at any time.
+    </p>
+  </div>
+
+</div>
+
+<script>
+/* Connect page — depends only on Settings + Intervals, which the layout loads
+   after this block, so wait for them. */
+document.addEventListener('DOMContentLoaded', function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var keyEl = $('cn-key'), athEl = $('cn-athlete'), persistEl = $('cn-persist'), statusEl = $('cn-status');
+
+  function say(kind, msg) {
+    statusEl.className = 'status status-' + kind;
+    statusEl.textContent = msg;
+    statusEl.style.display = msg ? '' : 'none';
+  }
+
+  function render() {
+    var s = Settings.all();
+    var on = !!Settings.getIcuKey();
+    $('cn-steps').style.display = on ? 'none' : '';
+    $('cn-connected').style.display = on ? '' : 'none';
+    $('cn-connected').textContent = on
+      ? 'Connected' + (s.icuAthleteName ? ' as ' + s.icuAthleteName : '') + '.'
+      : '';
+    $('cn-back').style.display = on ? '' : 'none';
+    $('cn-change').style.display = on ? '' : 'none';
+    $('cn-forget').style.display = on ? '' : 'none';
+    $('cn-later').style.display = on ? 'none' : '';
+    athEl.value = s.icuAthlete || '';
+    persistEl.value = s.icuKeyPersist || 'local';
+  }
+
+  async function connect() {
+    var key = keyEl.value.trim();
+    var ath = athEl.value.trim();
+    if (!key) { say('err', 'Paste your API key first.'); keyEl.focus(); return; }
+    say('info', 'Contacting intervals.icu…');
+    $('cn-connect').disabled = true;
+    try {
+      var athlete = await Intervals.testKey(key, ath || '0');
+      Settings.set({
+        icuKey: key, icuAthlete: ath, icuAthleteName: athlete.name || '',
+        icuKeyPersist: persistEl.value,
+      });
+      keyEl.value = '';
+      var bits = [];
+      if (athlete.ftp)    bits.push('FTP ' + athlete.ftp + ' W');
+      if (athlete.weight) bits.push(athlete.weight.toFixed(1) + ' kg');
+      say('ok', bits.length ? 'Found your profile: ' + bits.join(' · ') + '.' : '');
+      render();
+      $('cn-back').focus();
+    } catch (err) {
+      say('err', String(err.message || err) + ' — check the key was copied whole, with no spaces.');
+    } finally {
+      $('cn-connect').disabled = false;
+    }
+  }
+
+  $('cn-connect').addEventListener('click', connect);
+  keyEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') connect(); });
+  // Most people paste and expect it to work; don't make them find the button.
+  keyEl.addEventListener('paste', function () { setTimeout(function () { if (keyEl.value.trim()) connect(); }, 0); });
+
+  $('cn-change').addEventListener('click', function () {
+    $('cn-steps').style.display = '';
+    $('cn-change').style.display = 'none';
+    say('', '');
+    keyEl.focus();
+  });
+
+  $('cn-forget').addEventListener('click', function () {
+    Settings.forgetIcuKey();
+    Settings.set({ icuAthlete: '', icuAthleteName: '' });
+    render();
+    say('ok', 'Disconnected — the key is erased from this browser. To revoke it entirely, regenerate it on intervals.icu.');
+  });
+
+  render();
+  if (!Settings.getIcuKey()) keyEl.focus();
+});
+</script>
