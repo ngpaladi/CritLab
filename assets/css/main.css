@@ -848,3 +848,19 @@ a.btn { text-decoration: none; display: inline-block; }
 
 .site-nav a.sibling { opacity: .75; }
 .privacy-callout a { color: var(--accent); }
+
+/* A small inline spinner for anything still on its way: a status note, a card
+   subtitle. Same ring as the busy overlay, sized to sit beside text. */
+.status-loading::before, .is-loading::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border: 2px solid var(--surface3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cl-spin .75s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .status-loading::before, .is-loading::before { animation: none; } }

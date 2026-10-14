@@ -191,9 +191,14 @@
     detectCrop(entry);
 
     renderRaceList();
-    // Both are optional network fetches; run them together rather than serially.
-    await Promise.all([ensureWeather(entry), ensureOsm(entry)]);
+    // Weather feeds the wind model, so the analysis waits for it. The basemap
+    // is only a backdrop: start it alongside, draw without it, and redraw when
+    // it arrives. Not awaited, so a slow Overpass mirror can't hold the page
+    // blank or the overlay up.
+    const map = ensureOsm(entry);
+    await ensureWeather(entry);
     recompute();
+    map.then(fetched => { if (fetched && current() === entry && entry.A) renderAll(); });
   }
 
   function current() {
@@ -240,7 +245,7 @@
     const bounds = Osm.boundsOf(entry.P);
     if (!bounds) { entry.osmError = 'no usable GPS bounds'; return; }
 
-    setBusy(true, 'Fetching map…');
+    entry.osmPending = true;
     try {
       entry.osm = await Osm.fetchFor(bounds);
       entry.osmError = null;
@@ -248,8 +253,9 @@
       entry.osm = null;
       entry.osmError = String(err.message || err);
     } finally {
-      setBusy(false);
+      entry.osmPending = false;
     }
+    return true;
   }
 
   /** The basemap to draw, or null when it is off or unavailable. */
@@ -736,7 +742,7 @@
       out.innerHTML = '<div class="status status-warn">Not connected. <a href="' + connectUrl() + '">Connect intervals.icu</a> first.</div>';
       return;
     }
-    out.innerHTML = '<div class="status status-info">Searching…</div>';
+    out.innerHTML = '<div class="status status-info status-loading">Searching…</div>';
     try {
       const list = await Intervals.listActivities({
         key,
@@ -877,9 +883,10 @@
         '</span></span>';
       row.addEventListener('click', async () => {
         const note = document.createElement('div');
-        note.className = 'status status-info';
+        note.className = 'status status-info status-loading';
         note.textContent = 'Downloading streams…';
         out.replaceChildren(note);
+        setBusy(true, 'Downloading from intervals.icu…');
         try {
           await loadRaw(await Intervals.loadRide(a.id, key));
           note.className = 'status status-ok';
@@ -887,6 +894,8 @@
         } catch (err) {
           note.className = 'status status-err';
           note.textContent = String(err.message || err);
+        } finally {
+          setBusy(false);
         }
       });
       out.appendChild(row);
@@ -921,9 +930,9 @@
     // Validate what was just typed before complaining about configuration: it
     // is the thing the user most recently acted on, and the check is free.
     if (!id) { say('err', 'That does not look like an activity ID or URL.'); return; }
-    if (!key) { say('warn', 'No API key saved. Press Key above to add one.'); return; }
+    if (!key) { say('warn', 'Not connected. Connect intervals.icu first.'); return; }
 
-    say('info', 'Fetching ' + id + '…');
+    say('info status-loading', 'Fetching ' + id + '…');
     setBusy(true, 'Fetching activity ' + id + '…');
     try {
       await loadRaw(await Intervals.loadRide(id, key));
@@ -1614,6 +1623,7 @@
           ratioLegend() + key(Charts.INK.text, 'wind, dashed', 'dash');
         $('heat-legend').innerHTML = heatLegend($('heatmap'));
         $('map-sub').textContent = mapSubtitle(entry);
+        $('map-sub').classList.toggle('is-loading', !!entry.osmPending && Settings.get('osmBasemap') !== false);
         break;
 
       case 'laps':
@@ -1716,6 +1726,7 @@
       return prefix + c.roads + ' roads · ' + c.buildings + ' buildings from OpenStreetMap';
     }
     if (entry.osmError) return prefix + 'no basemap: ' + entry.osmError;
+    if (entry.osmPending) return prefix + 'loading basemap…';
     return prefix;
   }
 

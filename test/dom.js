@@ -194,9 +194,30 @@ async function bootPage(file) {
 
   section('Sample race');
 
+  // A hanging Overpass mirror must cost the basemap, not the analysis: hold
+  // every map request open until the checks below have run.
+  const offline = window.fetch;
+  const heldMaps = [];
+  window.fetch = url => /overpass/.test(String(url))
+    ? new Promise((_, reject) => heldMaps.push(() => reject(new Error('network disabled'))))
+    : offline(url);
   $('demo-btn').dispatchEvent(new window.Event('click'));
   for (let i = 0; i < 60 && !window.CritLab.state.races.length; i++) await settle(100);
   await settle(600);
+  check('analysis renders while the basemap is still loading',
+    heldMaps.length > 0 && !!(window.CritLab.state.races[0] && window.CritLab.state.races[0].A),
+    heldMaps.length + ' map requests held');
+  check('the busy overlay is down meanwhile', $('busy-overlay').hidden === true);
+  clickTab('circuit');
+  await settle(100);
+  check('the circuit map says the basemap is loading', $('map-sub').classList.contains('is-loading')
+    && /loading basemap/.test($('map-sub').textContent), $('map-sub').textContent);
+  window.fetch = offline;
+  while (heldMaps.length) { heldMaps.shift()(); await settle(20); }
+  await settle(150);
+  check('and stops saying so once it gives up', !$('map-sub').classList.contains('is-loading'), $('map-sub').textContent);
+  clickTab('overview');
+  await settle(100);
 
   const entry = window.CritLab.state.races[0];
   check('race added to the list', !!entry, window.CritLab.state.races.length + ' races');
@@ -723,7 +744,7 @@ async function bootPage(file) {
     $('icu-id-load').dispatchEvent(new window.Event('click'));
     await settle(300);
     check('a full URL is parsed past validation (then blocked on the missing key)',
-      /No API key/.test($('icu-id-status').textContent),
+      /Not connected/.test($('icu-id-status').textContent),
       $('icu-id-status').textContent.slice(0, 70));
   }
 

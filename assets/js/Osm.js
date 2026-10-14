@@ -19,11 +19,13 @@
  */
 const Osm = (() => {
 
-  // Overpass instances, tried in order. The main overpass-api.de endpoint
-  // rejects some clients outright (HTTP 406), so it is not first.
+  // Overpass instances, tried in order. overpass-api.de answers browsers in a
+  // few seconds (it returns 406 to curl, not to fetch); the mirrors are the
+  // fallback — as of 2026-10 both hang until the timeout, so going first they
+  // left the basemap 30 s late.
   const MIRRORS = [
-    'https://overpass.kumi.systems/api/interpreter',
     'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
     'https://overpass.private.coffee/api/interpreter',
   ];
 
