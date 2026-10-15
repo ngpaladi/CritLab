@@ -847,6 +847,11 @@ a.btn { text-decoration: none; display: inline-block; }
 .btn.icu-connect-cta { display: block; text-align: center; padding: 8px; margin-bottom: 6px; }
 
 .site-nav a.sibling { opacity: .75; }
+/* Two sibling links don't fit beside the title on a phone; About links them too. */
+@media (max-width: 600px) {
+  .site-header { gap: 10px; padding: 0 12px; }
+  .site-nav a.sibling { display: none; }
+}
 .privacy-callout a { color: var(--accent); }
 
 /* A small inline spinner for anything still on its way: a status note, a card
